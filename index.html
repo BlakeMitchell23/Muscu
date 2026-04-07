@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -19,16 +19,35 @@
   <header class="app-header">
     <div class="app-logo">MuscuTrack</div>
     <div class="app-stats">
-      <span class="stat-value" id="stat-sessions">17</span> seances
+      <span class="stat-value" id="stat-sessions">0</span> séances <span class="stat-sep">·</span> <span class="text-muted" id="stat-next"></span>
     </div>
   </header>
 
-  <!-- TAB: PROGRESSION (home) -->
-  <div class="tab-content active" id="tab-progression">
-    <h1 class="page-title">Progression</h1>
+  <!-- TAB: ACCUEIL -->
+  <div class="tab-content active" id="tab-accueil">
+    <h1 class="page-title">Accueil</h1>
+
+    <div class="card">
+      <span class="card-title">Ma tendance</span>
+      <div class="chart-box"><canvas id="trend-chart"></canvas></div>
+      <div class="trend-stats" id="trend-stats"></div>
+    </div>
+
+    <div id="next-session-card"></div>
+
+    <div id="pr-section"></div>
+
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Charges</span>
+        <span class="card-title" style="margin:0">Historique récent</span>
+        <button class="btn-pill" id="btn-voir-tout">Voir tout</button>
+      </div>
+      <div class="sessions-history" id="recent-history"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" style="margin:0">Progression</span>
         <select class="seg-select" id="exercise-select"></select>
       </div>
       <div class="chart-box"><canvas id="progression-chart"></canvas></div>
@@ -41,7 +60,6 @@
 
   <!-- TAB: SÉANCE -->
   <div class="tab-content" id="tab-seance">
-    <!-- Écran 1 : Choix de la séance -->
     <div id="seance-screen1">
       <h1 class="page-title">Séance</h1>
       <div class="seance-meta-row">
@@ -55,33 +73,28 @@
         <div class="sessions-history" id="sessions-history"></div>
       </div>
     </div>
-    <!-- Écran 2 : Saisie rapide -->
     <div id="seance-screen2" class="seance-screen2 hidden">
       <div class="seance-header">
-        <button class="seance-back-btn" id="seance-back">←</button>
+        <button class="seance-back-btn" id="seance-back">&larr;</button>
         <span class="seance-header-title" id="seance-title">Session A</span>
         <span class="seance-header-badge" id="seance-badge"></span>
       </div>
       <div id="seance-exercises-list"></div>
-      <button type="button" class="btn-pill seance-add-exo" id="btn-seance-add-exo">+ Ajouter un exercice</button>
+      <button type="button" class="btn-pill seance-add-exo" id="btn-seance-add-exo">+ Exercice</button>
       <div class="seance-save-spacer"></div>
-      <button type="button" class="btn-primary seance-save-btn" id="btn-seance-save">Enregistrer la séance</button>
+      <button type="button" class="btn-primary seance-save-btn" id="btn-seance-save">Enregistrer</button>
     </div>
   </div>
 
-  <!-- TAB: EXERCICES -->
-  <div class="tab-content" id="tab-exercices">
-    <h1 class="page-title">Exercices</h1>
-    <div id="exercises-catalog"></div>
-  </div>
+  <!-- TAB: ENCYCLOPÉDIE -->
+  <div class="tab-content" id="tab-encyclopedie">
+    <h1 class="page-title">Encyclopédie</h1>
 
-  <!-- TAB: SCIENCE -->
-  <div class="tab-content" id="tab-science">
-    <h1 class="page-title">Science & Profil</h1>
     <div class="card card-gradient">
       <span class="card-title">Mon profil</span>
       <dl class="profile-grid" id="profile-grid"></dl>
     </div>
+
     <div class="card">
       <span class="card-title">Mon corps</span>
       <div class="body-container">
@@ -95,26 +108,31 @@
         <div class="body-legend" id="body-legend"></div>
       </div>
     </div>
+
+    <div class="card">
+      <span class="card-title">Catalogue d'exercices</span>
+      <div id="exercises-catalog"></div>
+    </div>
+
     <div id="science-content"></div>
   </div>
 
   <!-- BOTTOM NAV -->
   <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="progression">
-      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      <span>Progrès</span>
+    <button class="tab-btn active" data-tab="accueil">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><polyline points="9 21 9 14 15 14 15 21"/></svg>
+      <span>Accueil</span>
+      <div class="tab-dot"></div>
     </button>
     <button class="tab-btn" data-tab="seance">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="9" width="3" height="6" rx="1"/><rect x="19" y="9" width="3" height="6" rx="1"/><rect x="6" y="6" width="3" height="12" rx="1"/><rect x="15" y="6" width="3" height="12" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="9" width="3" height="6" rx="1"/><rect x="19" y="9" width="3" height="6" rx="1"/><rect x="6" y="6" width="3" height="12" rx="1"/><rect x="15" y="6" width="3" height="12" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
       <span>Séance</span>
+      <div class="tab-dot"></div>
     </button>
-    <button class="tab-btn" data-tab="exercices">
-      <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-      <span>Exercices</span>
-    </button>
-    <button class="tab-btn" data-tab="science">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-      <span>Science</span>
+    <button class="tab-btn" data-tab="encyclopedie">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      <span>Encyclopédie</span>
+      <div class="tab-dot"></div>
     </button>
   </nav>
 
