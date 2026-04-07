@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="muscuGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7b79e8" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="115" fill="url(#muscuGradient)" />
+
+  <g transform="translate(256, 256) rotate(-35) translate(-256, -256)" fill="#ffffff" filter="url(#shadow)">
+    <rect x="186" y="236" width="140" height="40" rx="20" />
+
+    <rect x="136" y="166" width="40" height="180" rx="20" />
+    <rect x="336" y="166" width="40" height="180" rx="20" />
+
+    <rect x="86" y="206" width="40" height="100" rx="20" />
+    <rect x="386" y="206" width="40" height="100" rx="20" />
+  </g>
+</svg>
