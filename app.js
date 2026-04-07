@@ -149,7 +149,7 @@ function getExercisesForMuscle(muscleId) {
   return out;
 }
 
-// ---- FORCE INDEX ----
+// ---- FORCE INDEX (with detail for tooltip) ----
 function computeForceIndex() {
   const bases = {};
   if (state.sessions.length > 0) {
@@ -157,13 +157,18 @@ function computeForceIndex() {
   }
   return state.sessions.map(s => {
     let total = 0, count = 0;
+    const details = [];
     s.exercises.forEach(ex => {
       const vol = ex.charge * ex.series * ex.reps;
       const base = bases[ex.name] || vol;
       if (!bases[ex.name]) bases[ex.name] = vol;
-      if (base > 0) { total += (vol / base) * 100; count++; }
+      if (base > 0) {
+        const pct = Math.round((vol / base) * 100);
+        total += pct; count++;
+        details.push({ name: ex.name, vol, base, pct });
+      }
     });
-    return { date: s.date, index: count > 0 ? Math.round(total / count) : 100 };
+    return { date: s.date, id: s.id, index: count > 0 ? Math.round(total / count) : 100, details };
   });
 }
 
@@ -268,25 +273,36 @@ function renderTrendChart() {
   const canvas = document.getElementById('trend-chart');
   if (!canvas) return;
 
-  let labels, trendData, statsHTML;
+  let labels, trendData, rawValues, statsHTML, trendMeta;
+  const W = 4;
 
   if (mode === '__GLOBAL__') {
     const data = computeForceIndex();
     if (!data.length) return;
-    const rawValues = data.map(d => d.index);
-    trendData = computeTrend(rawValues, 4);
+    rawValues = data.map(d => d.index);
+    trendData = computeTrend(rawValues, W);
     labels = data.map(d => fmtDate(d.date));
+    trendMeta = data.map((d, i) => {
+      const start = Math.max(0, i - W + 1);
+      const window = rawValues.slice(start, i + 1);
+      return { type: 'global', id: d.id, date: d.date, raw: d.index, windowSize: window.length, windowValues: window, details: d.details };
+    });
     statsHTML = `<div class="trend-stat"><span class="stat-value">${state.sessions.length}</span> séances</div>` +
       `<div class="trend-stat">Indice: <span class="stat-value">${trendData[trendData.length - 1]}</span></div>`;
   } else {
     const prog = getExerciseProgression(mode);
     if (!prog.length) { document.getElementById('trend-stats').innerHTML = ''; return; }
-    const rawValues = prog.map(p => p.charge * p.series * p.reps);
-    trendData = computeTrend(rawValues, 4);
+    rawValues = prog.map(p => p.charge * p.series * p.reps);
+    trendData = computeTrend(rawValues, W);
     labels = prog.map(p => fmtDate(p.date));
+    trendMeta = prog.map((p, i) => {
+      const start = Math.max(0, i - W + 1);
+      const window = rawValues.slice(start, i + 1);
+      return { type: 'exo', date: p.date, charge: p.charge, series: p.series, reps: p.reps, vol: rawValues[i], windowSize: window.length, windowValues: window };
+    });
     const last = prog[prog.length - 1];
     statsHTML = `<div class="trend-stat">Dernière: <span class="stat-value">${last.charge}kg</span></div>` +
-      `<div class="trend-stat">${last.series}&times;${last.reps}</div>`;
+      `<div class="trend-stat">${last.series}\u00d7${last.reps}</div>`;
   }
 
   state.charts.trend = new Chart(canvas.getContext('2d'), {
@@ -296,7 +312,36 @@ function renderTrendChart() {
       responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: 'easeOutQuart' },
       scales: { y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2', font: { size: 10 } } }, x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 }, maxRotation: 45 } } },
-      plugins: { legend: { display: false }, tooltip: { animation: { duration: 100 }, backgroundColor: '#1c1c1e', titleColor: '#fff', bodyColor: '#ccc' } }
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          animation: { duration: 100 },
+          backgroundColor: 'rgba(28,28,30,0.95)',
+          titleColor: '#fff', bodyColor: '#ccc',
+          titleFont: { weight: '700', size: 12 },
+          bodyFont: { size: 11 },
+          padding: 10,
+          cornerRadius: 10,
+          displayColors: false,
+          callbacks: {
+            title(items) { if (!items.length) return ''; const m = trendMeta[items[0].dataIndex]; return m ? fmtDate(m.date) : items[0].label; },
+            label(item) {
+              const m = trendMeta[item.dataIndex]; if (!m) return `Tendance: ${item.formattedValue}`;
+              const lines = [`Tendance: ${item.formattedValue}`, `Moy. mobile sur ${m.windowSize} pt${m.windowSize > 1 ? 's' : ''}`];
+              if (m.type === 'global') {
+                lines.push(`${m.id} — Indice brut: ${m.raw}`);
+                lines.push('---');
+                m.details.slice(0, 5).forEach(d => { lines.push(`${d.name.length > 20 ? d.name.substring(0,18) + '..' : d.name}: ${d.pct}%`); });
+                if (m.details.length > 5) lines.push(`+ ${m.details.length - 5} autres`);
+              } else {
+                lines.push(`${m.charge}kg × ${m.series}×${m.reps} = ${m.vol}`);
+                if (m.windowSize > 1) lines.push(`Fenêtre: ${m.windowValues.join(' → ')}`);
+              }
+              return lines;
+            }
+          }
+        }
+      }
     }
   });
   document.getElementById('trend-stats').innerHTML = statsHTML;
