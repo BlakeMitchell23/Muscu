@@ -5,13 +5,59 @@ import createBodyHighlighter from 'https://esm.sh/body-highlighter@3';
 
 const state = { sessions: [], bodyView: 'front', charts: {}, bodyHL: null };
 
+// ---- SUPABASE ----
+let supabase = null;
+try {
+  if (typeof SUPABASE_URL !== 'undefined' && typeof SUPABASE_KEY !== 'undefined' && SUPABASE_URL && SUPABASE_KEY) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+} catch(e) { /* config.js missing or invalid */ }
+
+async function syncFromSupabase() {
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.from('sessions').select('*').order('date', { ascending: true });
+    if (!error && data && data.length) {
+      state.sessions = data.map(row => ({ id: row.id, date: row.date, energy: row.energy, exercises: typeof row.exercises === 'string' ? JSON.parse(row.exercises) : row.exercises }));
+      saveSessions();
+      renderAll();
+    }
+  } catch(e) { /* silent */ }
+}
+
+async function pushAllToSupabase() {
+  if (!supabase) return;
+  try {
+    for (const s of state.sessions) {
+      await supabase.from('sessions').upsert({ id: s.id, date: s.date, energy: s.energy, exercises: JSON.stringify(s.exercises) }, { onConflict: 'id' });
+    }
+  } catch(e) { /* silent */ }
+}
+
+async function upsertSessionToSupabase(s) {
+  if (!supabase) return;
+  try {
+    await supabase.from('sessions').upsert({ id: s.id, date: s.date, energy: s.energy, exercises: JSON.stringify(s.exercises) }, { onConflict: 'id' });
+  } catch(e) { /* silent */ }
+}
+
+async function deleteSessionFromSupabase(id) {
+  if (!supabase) return;
+  try { await supabase.from('sessions').delete().eq('id', id); } catch(e) { /* silent */ }
+}
+
 // ---- INIT ----
 function init() {
   loadSessions();
   setupTabs();
   setupEnergySelector();
+  setupSeanceLibre();
+  setupBodyToggle();
+  setupTrendSelect();
+  setupVoirTout();
   populateDataLists();
   renderAll();
+  syncFromSupabase();
 }
 
 function renderAll() {
@@ -27,18 +73,14 @@ function loadSessions() {
   state.sessions = s ? JSON.parse(s) : JSON.parse(JSON.stringify(INITIAL_SESSIONS));
   if (!s) saveSessions();
 }
-function saveSessions() { localStorage.setItem('muscu_sessions', JSON.stringify(state.sessions)); }
-
-function loadProfileOverrides() {
-  const s = localStorage.getItem('muscu_profile_overrides');
-  return s ? JSON.parse(s) : {};
+function saveSessions() {
+  localStorage.setItem('muscu_sessions', JSON.stringify(state.sessions));
+  pushAllToSupabase();
 }
+
+function loadProfileOverrides() { const s = localStorage.getItem('muscu_profile_overrides'); return s ? JSON.parse(s) : {}; }
 function saveProfileOverrides(o) { localStorage.setItem('muscu_profile_overrides', JSON.stringify(o)); }
-
-function loadWeightHistory() {
-  const s = localStorage.getItem('muscu_weight_history');
-  return s ? JSON.parse(s) : [];
-}
+function loadWeightHistory() { const s = localStorage.getItem('muscu_weight_history'); return s ? JSON.parse(s) : []; }
 function saveWeightHistory(h) { localStorage.setItem('muscu_weight_history', JSON.stringify(h)); }
 
 // ---- TABS ----
@@ -64,6 +106,12 @@ function switchTab(tab) {
 }
 function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
+function showCheckmark() {
+  const el = document.getElementById('checkmark-overlay');
+  el.classList.add('active');
+  setTimeout(() => el.classList.remove('active'), 700);
+}
+
 // ---- UTILS ----
 function computeVolumeByGroup() {
   const vol = {}, recent = state.sessions.slice(-6);
@@ -78,6 +126,12 @@ function getExerciseProgression(name) {
   return d;
 }
 function getAllExerciseNames() { const n = new Set(); state.sessions.forEach(s => s.exercises.forEach(ex => n.add(ex.name))); return [...n].sort(); }
+function getAllKnownExerciseNames() {
+  const n = new Set();
+  state.sessions.forEach(s => s.exercises.forEach(ex => n.add(ex.name)));
+  PLANNING[0].sessions.forEach(s => s.exercises.forEach(ex => n.add(ex.name)));
+  return [...n].sort();
+}
 function getMaxCharges() { const m = {}; state.sessions.forEach(s => s.exercises.forEach(ex => { if (!m[ex.name] || ex.charge > m[ex.name]) m[ex.name] = ex.charge; })); return m; }
 function getLastChargeAndRessenti(name) {
   for (let i = state.sessions.length - 1; i >= 0; i--) {
@@ -87,7 +141,6 @@ function getLastChargeAndRessenti(name) {
   return null;
 }
 function fmtDate(d) { return new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }); }
-function fmtDateFull(d) { return new Date(d).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }); }
 function getExercisesForMuscle(muscleId) {
   const groups = MUSCLE_TO_GROUPS[muscleId] || [], out = [];
   state.sessions.forEach(s => { s.exercises.forEach(ex => { if (groups.includes(ex.group)) out.push({ ...ex, date: s.date, sessionId: s.id }); }); });
@@ -98,9 +151,7 @@ function getExercisesForMuscle(muscleId) {
 function computeForceIndex() {
   const bases = {};
   if (state.sessions.length > 0) {
-    state.sessions[0].exercises.forEach(ex => {
-      if (!bases[ex.name]) bases[ex.name] = ex.charge * ex.series * ex.reps;
-    });
+    state.sessions[0].exercises.forEach(ex => { if (!bases[ex.name]) bases[ex.name] = ex.charge * ex.series * ex.reps; });
   }
   return state.sessions.map(s => {
     let total = 0, count = 0;
@@ -114,13 +165,12 @@ function computeForceIndex() {
   });
 }
 
-function computeTrend(data, window) {
-  if (data.length < window) return data.map(d => d.index);
-  return data.map((_, i) => {
-    if (i < window - 1) return null;
+function computeTrend(values, w) {
+  return values.map((_, i) => {
+    const start = Math.max(0, i - w + 1);
     let sum = 0;
-    for (let j = i - window + 1; j <= i; j++) sum += data[j].index;
-    return Math.round(sum / window);
+    for (let j = start; j <= i; j++) sum += values[j];
+    return Math.round(sum / (i - start + 1));
   });
 }
 
@@ -135,38 +185,21 @@ function getNextSessionKey() {
     { key: 'session-c', names: getTemplateExerciseNames('session-c') }
   ];
   let bestMatch = 'session-a', bestScore = -1;
-  templates.forEach(t => {
-    const score = t.names.filter(n => lastNames.has(n)).length;
-    if (score > bestScore) { bestScore = score; bestMatch = t.key; }
-  });
+  templates.forEach(t => { const score = t.names.filter(n => lastNames.has(n)).length; if (score > bestScore) { bestScore = score; bestMatch = t.key; } });
   const cycle = ['session-a', 'session-b', 'session-c'];
-  const idx = cycle.indexOf(bestMatch);
-  return cycle[(idx + 1) % 3];
+  return cycle[(cycle.indexOf(bestMatch) + 1) % 3];
 }
-
-function getTemplateExerciseNames(typeKey) {
-  const week = PLANNING[0];
-  const session = week.sessions.find(s => s.type === typeKey);
-  return session ? session.exercises.map(e => e.name) : [];
-}
+function getTemplateExerciseNames(typeKey) { const s = PLANNING[0].sessions.find(s => s.type === typeKey); return s ? s.exercises.map(e => e.name) : []; }
 
 // ---- RECENT PRs ----
 function getRecentPRs() {
-  const prs = [];
-  const byExo = {};
-  state.sessions.forEach(s => {
-    s.exercises.forEach(ex => {
-      if (!byExo[ex.name]) byExo[ex.name] = [];
-      byExo[ex.name].push({ vol: ex.charge * ex.series * ex.reps, charge: ex.charge, date: s.date });
-    });
-  });
+  const prs = [], byExo = {};
+  state.sessions.forEach(s => { s.exercises.forEach(ex => { if (!byExo[ex.name]) byExo[ex.name] = []; byExo[ex.name].push({ vol: ex.charge * ex.series * ex.reps, charge: ex.charge, date: s.date }); }); });
   Object.entries(byExo).forEach(([name, entries]) => {
     if (entries.length < 2) return;
     const last = entries[entries.length - 1];
     const prevMax = Math.max(...entries.slice(0, -1).map(e => e.vol));
-    if (last.vol > prevMax && last.vol > 0) {
-      prs.push({ name, charge: last.charge, date: last.date });
-    }
+    if (last.vol > prevMax && last.vol > 0) prs.push({ name, charge: last.charge, date: last.date });
   });
   return prs.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
 }
@@ -184,68 +217,87 @@ function getSuggestion(name) {
 // ============================================================
 function updateHeaderStats() {
   document.getElementById('stat-sessions').textContent = state.sessions.length;
-  const nextKey = getNextSessionKey();
-  const label = { 'session-a': 'A', 'session-b': 'B', 'session-c': 'C' }[nextKey] || '?';
+  const label = { 'session-a': 'A', 'session-b': 'B', 'session-c': 'C' }[getNextSessionKey()] || '?';
   document.getElementById('stat-next').textContent = 'Prochaine: ' + label;
+}
+
+// ============================================================
+// SHARED HISTORY RENDERER
+// ============================================================
+function renderHistoryInto(containerId, limit) {
+  const c = document.getElementById(containerId); if (!c) return;
+  const sorted = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date));
+  const items = limit ? sorted.slice(0, limit) : sorted;
+  const ec = ['#FF453A', '#FF9F0A', '#ffcc00', '#30D158', '#007aff'];
+  c.innerHTML = items.map(s => `<div class="session-history-item" data-sid="${s.id}"><div><span class="fw-600">${s.id}</span> <span class="text-muted">${fmtDate(s.date)}</span></div><div><span style="color:var(--accent)">${s.exercises.length} exos</span> <span style="color:${ec[Math.round(s.energy) - 1] || '#ffcc00'}">E${s.energy}</span></div></div>`).join('');
+  c.querySelectorAll('.session-history-item').forEach(item => { item.addEventListener('click', () => viewSession(item.dataset.sid)); });
 }
 
 // ============================================================
 // ACCUEIL TAB
 // ============================================================
 function renderAccueilTab() {
+  renderTrendSelect();
   renderTrendChart();
   renderNextSessionCard();
   renderPRSection();
-  renderRecentHistory();
-  renderExerciseSelect();
-  renderProgressionChart();
+  renderHistoryInto('recent-history', 5);
   renderProgressTable();
 }
-function refreshAccueilCharts() {
-  renderTrendChart();
-  renderProgressionChart();
+function refreshAccueilCharts() { renderTrendChart(); }
+
+// Trend select (populated once, content updated on renderAll)
+function setupTrendSelect() {
+  document.getElementById('trend-select').addEventListener('change', () => renderTrendChart());
+}
+function renderTrendSelect() {
+  const sel = document.getElementById('trend-select');
+  const prev = sel.value;
+  const names = getAllKnownExerciseNames();
+  sel.innerHTML = '<option value="__GLOBAL__">Global</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 }
 
 // Trend chart
 function renderTrendChart() {
-  const data = computeForceIndex();
-  const trend = computeTrend(data, 4);
+  const sel = document.getElementById('trend-select');
+  const mode = sel ? sel.value : '__GLOBAL__';
   if (state.charts.trend) state.charts.trend.destroy();
   const canvas = document.getElementById('trend-chart');
-  if (!canvas || !data.length) return;
+  if (!canvas) return;
+
+  let labels, trendData, statsHTML;
+
+  if (mode === '__GLOBAL__') {
+    const data = computeForceIndex();
+    if (!data.length) return;
+    const rawValues = data.map(d => d.index);
+    trendData = computeTrend(rawValues, 4);
+    labels = data.map(d => fmtDate(d.date));
+    statsHTML = `<div class="trend-stat"><span class="stat-value">${state.sessions.length}</span> séances</div>` +
+      `<div class="trend-stat">Indice: <span class="stat-value">${trendData[trendData.length - 1]}</span></div>`;
+  } else {
+    const prog = getExerciseProgression(mode);
+    if (!prog.length) { document.getElementById('trend-stats').innerHTML = ''; return; }
+    const rawValues = prog.map(p => p.charge * p.series * p.reps);
+    trendData = computeTrend(rawValues, 4);
+    labels = prog.map(p => fmtDate(p.date));
+    const last = prog[prog.length - 1];
+    statsHTML = `<div class="trend-stat">Dernière: <span class="stat-value">${last.charge}kg</span></div>` +
+      `<div class="trend-stat">${last.series}&times;${last.reps}</div>`;
+  }
 
   state.charts.trend = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels: data.map(d => fmtDate(d.date)),
-      datasets: [{
-        label: 'Tendance',
-        data: trend,
-        borderColor: '#5856d6',
-        backgroundColor: 'rgba(88,86,214,.06)',
-        borderWidth: 2.5,
-        fill: true,
-        tension: .4,
-        pointRadius: 0,
-        pointHitRadius: 10
-      }]
-    },
+    data: { labels, datasets: [{ label: 'Tendance', data: trendData, borderColor: '#6C63FF', backgroundColor: 'rgba(108,99,255,.06)', borderWidth: 2.5, fill: true, tension: .4, pointRadius: 0, pointHitRadius: 10 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: 'easeOutQuart' },
-      scales: {
-        y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2', font: { size: 10 } } },
-        x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 }, maxRotation: 45 } }
-      },
+      scales: { y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2', font: { size: 10 } } }, x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 }, maxRotation: 45 } } },
       plugins: { legend: { display: false }, tooltip: { animation: { duration: 100 }, backgroundColor: '#1c1c1e', titleColor: '#fff', bodyColor: '#ccc' } }
     }
   });
-
-  // Trend stats
-  const lastTrend = trend.filter(v => v !== null);
-  const el = document.getElementById('trend-stats');
-  el.innerHTML = `<div class="trend-stat"><span class="stat-value">${state.sessions.length}</span> séances</div>` +
-    (lastTrend.length ? `<div class="trend-stat">Indice: <span class="stat-value">${lastTrend[lastTrend.length - 1]}</span></div>` : '');
+  document.getElementById('trend-stats').innerHTML = statsHTML;
 }
 
 // Next session card
@@ -254,7 +306,7 @@ function renderNextSessionCard() {
   const nextKey = getNextSessionKey();
   const tmpl = SESSION_TEMPLATES.find(t => t.key === nextKey);
   const exos = getTemplateExercises(nextKey);
-  container.innerHTML = `<div class="next-card" style="border-left-color:${tmpl.color}" id="next-card-tap">
+  container.innerHTML = `<div class="next-card" style="border-left-color:${tmpl.color}">
     <div class="next-card-top"><div class="next-card-title" style="color:${tmpl.color}">${tmpl.label}</div></div>
     <div class="next-card-sub">${tmpl.sub}</div>
     <div class="next-card-count">${exos.length} exercices</div>
@@ -275,90 +327,59 @@ function renderPRSection() {
     <div class="pr-scroll">${prs.map(pr => `<div class="pr-card"><div class="pr-card-name">${pr.name}</div><div class="pr-card-charge">${pr.charge}kg <span class="pr-badge">PR</span></div></div>`).join('')}</div></div>`;
 }
 
-// Recent history
-function renderRecentHistory() {
-  const c = document.getElementById('recent-history');
-  const sorted = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
-  const ec = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff'];
-  c.innerHTML = sorted.map(s => `<div class="session-history-item" data-sid="${s.id}"><div><span class="fw-600">${s.id}</span> <span class="text-muted">${fmtDate(s.date)}</span></div><div><span style="color:var(--accent)">${s.exercises.length} exos</span> <span style="color:${ec[Math.round(s.energy) - 1] || '#ffcc00'}">E${s.energy}</span></div></div>`).join('');
-  c.querySelectorAll('.session-history-item').forEach(item => { item.addEventListener('click', () => viewSession(item.dataset.sid)); });
-
-  document.getElementById('btn-voir-tout')?.addEventListener('click', () => openFullHistory());
+// Voir tout button (attached once in init)
+function setupVoirTout() {
+  document.getElementById('btn-voir-tout').addEventListener('click', () => openFullHistory());
 }
 
 function openFullHistory() {
   const panel = document.getElementById('panel'), overlay = document.getElementById('panel-overlay');
   const sorted = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date));
-  const ec = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff'];
+  const ec = ['#FF453A', '#FF9F0A', '#ffcc00', '#30D158', '#007aff'];
   panel.innerHTML = `<div class="panel-handle"></div><button class="panel-close" id="pc">\u2715</button>
     <h2>Historique complet</h2>
     <div class="sessions-history" style="max-height:none">${sorted.map(s => `<div class="session-history-item" data-sid="${s.id}"><div><span class="fw-600">${s.id}</span> <span class="text-muted">${fmtDate(s.date)}</span></div><div><span style="color:var(--accent)">${s.exercises.length} exos</span> <span style="color:${ec[Math.round(s.energy) - 1] || '#ffcc00'}">E${s.energy}</span></div></div>`).join('')}</div>`;
   document.getElementById('pc').addEventListener('click', closePanel);
-  overlay.classList.add('active'); panel.classList.add('active');
-  overlay.onclick = closePanel;
+  overlay.classList.add('active'); panel.classList.add('active'); overlay.onclick = closePanel;
   setupPanelDrag(panel);
   panel.querySelectorAll('.session-history-item').forEach(item => {
     item.addEventListener('click', () => { closePanel(); setTimeout(() => viewSession(item.dataset.sid), 350); });
   });
 }
 
-// Progression chart + table
-function renderExerciseSelect() {
-  const sel = document.getElementById('exercise-select');
-  const names = getAllExerciseNames();
-  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
-  sel.addEventListener('change', () => renderProgressionChart());
-}
-
-function renderProgressionChart() {
-  const sel = document.getElementById('exercise-select');
-  if (!sel || !sel.value) return;
-  const selected = sel.value;
-  if (state.charts.progression) state.charts.progression.destroy();
-  const p = getExerciseProgression(selected);
-  if (!p.length) return;
-  const data = p.map(x => x.charge * x.series * x.reps);
-  state.charts.progression = new Chart(document.getElementById('progression-chart').getContext('2d'), {
-    type: 'line',
-    data: { labels: p.map(x => fmtDate(x.date)), datasets: [{ label: 'Volume load', data, borderColor: '#5856d6', backgroundColor: 'rgba(88,86,214,.06)', borderWidth: 2.5, fill: true, tension: .3, pointBackgroundColor: '#5856d6', pointRadius: 4 }] },
-    options: {
-      responsive: true, animation: { duration: 600, easing: 'easeOutQuart' }, interaction: { mode: 'nearest', intersect: false },
-      scales: { y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2' } }, x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 }, maxRotation: 45 } } },
-      plugins: { legend: { display: false }, tooltip: { animation: { duration: 100 }, backgroundColor: '#1c1c1e', titleColor: '#fff', bodyColor: '#ccc' } }
-    }
-  });
-}
-
+// Progress table (with tapable rows)
 function renderProgressTable() {
   const table = document.getElementById('progress-table');
   const rows = getAllExerciseNames().map(name => {
     const p = getExerciseProgression(name); if (p.length < 2) return null;
     const pct = p[0].charge > 0 ? Math.round(((p[p.length - 1].charge - p[0].charge) / p[0].charge) * 100) : 0;
-    return { name, first: p[0].charge, last: p[p.length - 1].charge, pct, count: p.length };
+    return { name, first: p[0].charge, last: p[p.length - 1].charge, pct };
   }).filter(Boolean).sort((a, b) => b.pct - a.pct);
-  table.innerHTML = `<thead><tr><th>Exercice</th><th>Début</th><th>Actuel</th><th>Prog</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.name}</td><td>${r.first}kg</td><td>${r.last}kg</td><td><span class="badge ${r.pct > 0 ? 'badge-green' : r.pct < 0 ? 'badge-red' : 'badge-gray'}">${r.pct > 0 ? '+' : ''}${r.pct}%</span></td></tr>`).join('')}</tbody>`;
+  table.innerHTML = `<thead><tr><th>Exercice</th><th>Début</th><th>Actuel</th><th>Prog</th></tr></thead><tbody>${rows.map(r => `<tr data-exo="${r.name}"><td>${r.name}</td><td>${r.first}kg</td><td>${r.last}kg</td><td><span class="badge ${r.pct > 0 ? 'badge-green' : r.pct < 0 ? 'badge-red' : 'badge-gray'}">${r.pct > 0 ? '+' : ''}${r.pct}%</span></td></tr>`).join('')}</tbody>`;
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const name = tr.dataset.exo;
+      const group = EXERCISE_TO_GROUP[name] || '';
+      openExerciseDetail({ name, group });
+    });
+  });
 }
 
 // ============================================================
 // SÉANCE TAB — 2 screens
 // ============================================================
 const SESSION_TEMPLATES = [
-  { key: 'session-a', label: 'Session A', sub: 'Full Body Intense', color: '#5856d6' },
-  { key: 'session-b', label: 'Session B', sub: 'Full Body Moyen', color: '#ff9500' },
-  { key: 'session-c', label: 'Session C', sub: 'Full Body Léger + Jambes', color: '#34c759' }
+  { key: 'session-a', label: 'Session A', sub: 'Full Body Intense', color: '#6C63FF' },
+  { key: 'session-b', label: 'Session B', sub: 'Full Body Moyen', color: '#FF9F0A' },
+  { key: 'session-c', label: 'Session C', sub: 'Full Body Léger + Jambes', color: '#30D158' }
 ];
 
-function getTemplateExercises(typeKey) {
-  const week = PLANNING[0];
-  const session = week.sessions.find(s => s.type === typeKey);
-  return session ? session.exercises : [];
-}
+function getTemplateExercises(typeKey) { const s = PLANNING[0].sessions.find(s => s.type === typeKey); return s ? s.exercises : []; }
 
 function renderSeanceTab() {
   document.getElementById('f-session-date').value = new Date().toISOString().split('T')[0];
   renderSeanceCards();
-  renderSessionHistory();
-  setupSeanceLibre();
+  renderHistoryInto('sessions-history');
 }
 
 function renderSeanceCards() {
@@ -366,16 +387,16 @@ function renderSeanceCards() {
   container.innerHTML = SESSION_TEMPLATES.map(t => {
     const exos = getTemplateExercises(t.key);
     return `<div class="seance-card" data-session="${t.key}" style="border-left-color:${t.color}">
-      <div class="seance-card-title" style="color:${t.color}">${t.label}</div>
+      <div class="seance-card-content"><div class="seance-card-title" style="color:${t.color}">${t.label}</div>
       <div class="seance-card-sub">${t.sub}</div>
-      <div class="seance-card-count">${exos.length} exercices</div>
+      <div class="seance-card-count">${exos.length} exercices</div></div>
+      <span class="seance-card-chevron">\u203A</span>
     </div>`;
   }).join('');
   container.querySelectorAll('.seance-card').forEach(card => {
     card.addEventListener('click', () => {
       const key = card.dataset.session;
-      const tmpl = SESSION_TEMPLATES.find(t => t.key === key);
-      openSeanceScreen2(tmpl, getTemplateExercises(key));
+      openSeanceScreen2(SESSION_TEMPLATES.find(t => t.key === key), getTemplateExercises(key));
     });
   });
 }
@@ -393,39 +414,28 @@ function setupEnergySelector() {
 }
 
 function showSeanceScreen1() {
-  const s1 = document.getElementById('seance-screen1');
-  const s2 = document.getElementById('seance-screen2');
-  s2.classList.add('hidden');
-  s2.classList.remove('slide-in');
-  s1.style.display = '';
-  s1.classList.add('slide-in');
+  const s1 = document.getElementById('seance-screen1'), s2 = document.getElementById('seance-screen2');
+  s2.classList.add('hidden'); s2.classList.remove('slide-in');
+  s1.style.display = ''; s1.classList.add('slide-in');
   setTimeout(() => s1.classList.remove('slide-in'), 250);
 }
 
 function openSeanceScreen2(tmpl, templateExercises) {
-  const s1 = document.getElementById('seance-screen1');
-  const s2 = document.getElementById('seance-screen2');
+  const s1 = document.getElementById('seance-screen1'), s2 = document.getElementById('seance-screen2');
   document.getElementById('seance-title').textContent = tmpl.label;
   document.getElementById('seance-badge').style.background = tmpl.color;
-  s1.style.display = 'none';
-  s2.classList.remove('hidden');
-  s2.classList.add('slide-in');
+  s1.style.display = 'none'; s2.classList.remove('hidden'); s2.classList.add('slide-in');
   setTimeout(() => s2.classList.remove('slide-in'), 250);
   renderSeanceExercises(templateExercises);
-  setupSeanceScreen2Events(tmpl);
+  setupSeanceScreen2Events();
 }
 
 function renderSeanceExercises(templateExercises) {
-  const list = document.getElementById('seance-exercises-list');
-  const mc = getMaxCharges();
+  const list = document.getElementById('seance-exercises-list'), mc = getMaxCharges();
   list.innerHTML = '';
   templateExercises.forEach(ex => {
     const m = ex.sets.match(/^(\d+)[\u00d7x](\d+)/);
-    const series = m ? parseInt(m[1]) : 3;
-    const reps = m ? parseInt(m[2]) : 10;
-    const charge = mc[ex.name] || '';
-    const group = ex.group || EXERCISE_TO_GROUP[ex.name] || '';
-    list.appendChild(createSeanceExoRow({ name: ex.name, group, charge, series, reps, isTemplate: true }));
+    list.appendChild(createSeanceExoRow({ name: ex.name, group: ex.group || EXERCISE_TO_GROUP[ex.name] || '', charge: mc[ex.name] || '', series: m ? parseInt(m[1]) : 3, reps: m ? parseInt(m[2]) : 10, isTemplate: true }));
   });
 }
 
@@ -437,86 +447,33 @@ function createSeanceExoRow({ name, group, charge, series, reps, isTemplate }) {
   const suggText = suggestion ? `Suggestion: ${suggestion}kg` : '';
 
   if (isTemplate) {
-    div.innerHTML = `
-      <div class="seance-exo-line1">
-        <span class="seance-exo-name">${name}</span>
-        <button type="button" class="seance-exo-info-btn" data-exo-name="${name}">i</button>
-        <button type="button" class="seance-exo-remove">\u2715</button>
-      </div>
-      <div class="seance-exo-line2">
-        <span>${group}</span>
-        ${suggText ? `<span class="seance-exo-suggestion">${suggText}</span>` : ''}
-      </div>
-      <div class="seance-exo-line3">
-        <input type="number" class="seance-exo-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${charge}">
-        <input type="number" class="seance-exo-field seance-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${series}">
-        <input type="number" class="seance-exo-field seance-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${reps}">
-        <div class="seance-exo-ressenti">${ressentiBtns}</div>
-      </div>
-      <input type="hidden" class="seance-exo-name-val" value="${name}">
-      <input type="hidden" class="seance-exo-group-val" value="${group}">`;
+    div.innerHTML = `<div class="seance-exo-line1"><span class="seance-exo-name">${name}</span><button type="button" class="seance-exo-info-btn" data-exo-name="${name}">i</button><button type="button" class="seance-exo-remove">\u2715</button></div>
+      <div class="seance-exo-line2"><span>${group}</span>${suggText ? `<span class="seance-exo-suggestion">${suggText}</span>` : ''}</div>
+      <div class="seance-exo-line3"><input type="number" class="seance-exo-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${charge}"><input type="number" class="seance-exo-field seance-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${series}"><input type="number" class="seance-exo-field seance-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${reps}"><div class="seance-exo-ressenti">${ressentiBtns}</div></div>
+      <input type="hidden" class="seance-exo-name-val" value="${name}"><input type="hidden" class="seance-exo-group-val" value="${group}">`;
   } else {
-    div.innerHTML = `
-      <div class="seance-exo-line1">
-        <input type="text" class="seance-exo-name-input" list="exercise-names" placeholder="Nom de l'exercice" value="${name}">
-        <button type="button" class="seance-exo-remove">\u2715</button>
-      </div>
+    div.innerHTML = `<div class="seance-exo-line1"><input type="text" class="seance-exo-name-input" list="exercise-names" placeholder="Nom de l'exercice" value="${name}"><button type="button" class="seance-exo-remove">\u2715</button></div>
       <div class="seance-exo-line2"><span>&nbsp;</span></div>
-      <div class="seance-exo-line3">
-        <input type="number" class="seance-exo-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${charge}">
-        <input type="number" class="seance-exo-field seance-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${series}">
-        <input type="number" class="seance-exo-field seance-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${reps}">
-        <div class="seance-exo-ressenti">${ressentiBtns}</div>
-      </div>
-      <input type="hidden" class="seance-exo-name-val" value="${name}">
-      <input type="hidden" class="seance-exo-group-val" value="${group}">`;
-    const nameIn = div.querySelector('.seance-exo-name-input');
-    const groupVal = div.querySelector('.seance-exo-group-val');
-    const nameVal = div.querySelector('.seance-exo-name-val');
-    const chargeIn = div.querySelector('.seance-exo-charge');
-    nameIn.addEventListener('change', () => {
-      const n = nameIn.value.trim();
-      nameVal.value = n;
-      if (EXERCISE_TO_GROUP[n]) groupVal.value = EXERCISE_TO_GROUP[n];
-      const mc = getMaxCharges();
-      if (mc[n] && !chargeIn.value) chargeIn.value = mc[n];
-    });
+      <div class="seance-exo-line3"><input type="number" class="seance-exo-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${charge}"><input type="number" class="seance-exo-field seance-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${series}"><input type="number" class="seance-exo-field seance-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${reps}"><div class="seance-exo-ressenti">${ressentiBtns}</div></div>
+      <input type="hidden" class="seance-exo-name-val" value="${name}"><input type="hidden" class="seance-exo-group-val" value="${group}">`;
+    const nameIn = div.querySelector('.seance-exo-name-input'), groupVal = div.querySelector('.seance-exo-group-val'), nameVal = div.querySelector('.seance-exo-name-val'), chargeIn = div.querySelector('.seance-exo-charge');
+    nameIn.addEventListener('change', () => { const n = nameIn.value.trim(); nameVal.value = n; if (EXERCISE_TO_GROUP[n]) groupVal.value = EXERCISE_TO_GROUP[n]; const mc = getMaxCharges(); if (mc[n] && !chargeIn.value) chargeIn.value = mc[n]; });
   }
-
   div.querySelector('.seance-exo-remove').addEventListener('click', () => div.remove());
-  div.querySelectorAll('.ressenti-btn').forEach(btn => {
-    btn.addEventListener('click', () => { div.querySelectorAll('.ressenti-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); });
-  });
-
-  // Info button → open unified exercise panel
+  div.querySelectorAll('.ressenti-btn').forEach(btn => { btn.addEventListener('click', () => { div.querySelectorAll('.ressenti-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }); });
   const infoBtn = div.querySelector('.seance-exo-info-btn');
-  if (infoBtn) {
-    infoBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const exName = infoBtn.dataset.exoName;
-      const g = group || EXERCISE_TO_GROUP[exName] || '';
-      openExerciseDetail({ name: exName, group: g });
-    });
-  }
-
+  if (infoBtn) infoBtn.addEventListener('click', e => { e.stopPropagation(); openExerciseDetail({ name: infoBtn.dataset.exoName, group: group || EXERCISE_TO_GROUP[infoBtn.dataset.exoName] || '' }); });
   return div;
 }
 
-function setupSeanceScreen2Events(tmpl) {
-  const backBtn = document.getElementById('seance-back');
-  const newBack = backBtn.cloneNode(true);
+function setupSeanceScreen2Events() {
+  const backBtn = document.getElementById('seance-back'), newBack = backBtn.cloneNode(true);
   backBtn.parentNode.replaceChild(newBack, backBtn);
   newBack.addEventListener('click', () => showSeanceScreen1());
-
-  const addBtn = document.getElementById('btn-seance-add-exo');
-  const newAdd = addBtn.cloneNode(true);
+  const addBtn = document.getElementById('btn-seance-add-exo'), newAdd = addBtn.cloneNode(true);
   addBtn.parentNode.replaceChild(newAdd, addBtn);
-  newAdd.addEventListener('click', () => {
-    document.getElementById('seance-exercises-list').appendChild(createSeanceExoRow({ name: '', group: '', charge: '', series: 3, reps: 10, isTemplate: false }));
-  });
-
-  const saveBtn = document.getElementById('btn-seance-save');
-  const newSave = saveBtn.cloneNode(true);
+  newAdd.addEventListener('click', () => { document.getElementById('seance-exercises-list').appendChild(createSeanceExoRow({ name: '', group: '', charge: '', series: 3, reps: 10, isTemplate: false })); });
+  const saveBtn = document.getElementById('btn-seance-save'), newSave = saveBtn.cloneNode(true);
   saveBtn.parentNode.replaceChild(newSave, saveBtn);
   newSave.addEventListener('click', () => saveSeance());
 }
@@ -539,25 +496,22 @@ function saveSeance() {
   if (!exercises.length) { showToast('Ajoutez au moins un exercice !'); return; }
 
   const num = state.sessions.length + 1;
-  state.sessions.push({ id: 'S' + num, date, energy, exercises });
+  const session = { id: 'S' + num, date, energy, exercises };
+  state.sessions.push(session);
   state.sessions.sort((a, b) => a.date.localeCompare(b.date));
   saveSessions();
-  showSeanceScreen1();
-  renderAll();
-  showToast('Séance enregistrée \u2713');
+  upsertSessionToSupabase(session);
+  showCheckmark();
+  setTimeout(() => {
+    showSeanceScreen1();
+    renderAll();
+    showToast('\u2713 Séance enregistrée');
+  }, 700);
 }
 
 // ============================================================
 // SESSION HISTORY & EDIT
 // ============================================================
-function renderSessionHistory() {
-  const c = document.getElementById('sessions-history');
-  const sorted = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date));
-  const ec = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff'];
-  c.innerHTML = sorted.map(s => `<div class="session-history-item" data-sid="${s.id}"><div><span class="fw-600">${s.id}</span> <span class="text-muted">${fmtDate(s.date)}</span></div><div><span style="color:var(--accent)">${s.exercises.length} exos</span> <span style="color:${ec[Math.round(s.energy) - 1] || '#ffcc00'}">E${s.energy}</span></div></div>`).join('');
-  c.querySelectorAll('.session-history-item').forEach(item => { item.addEventListener('click', () => viewSession(item.dataset.sid)); });
-}
-
 function viewSession(id) {
   const session = state.sessions.find(s => s.id === id); if (!session) return;
   const panel = document.getElementById('panel'), overlay = document.getElementById('panel-overlay');
@@ -588,13 +542,9 @@ function viewSession(id) {
       <button class="btn-danger" id="btn-del" style="min-height:50px">Supprimer</button>
     </div>`;
 
-  panel.querySelectorAll('.edit-energy-btn').forEach(btn => {
-    btn.addEventListener('click', () => { panel.querySelectorAll('.edit-energy-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); });
-  });
+  panel.querySelectorAll('.edit-energy-btn').forEach(btn => { btn.addEventListener('click', () => { panel.querySelectorAll('.edit-energy-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }); });
   panel.querySelectorAll('.exercise-form-item').forEach(item => {
-    item.querySelectorAll('.edit-ressenti').forEach(btn => {
-      btn.addEventListener('click', () => { item.querySelectorAll('.edit-ressenti').forEach(b => b.classList.remove('active')); btn.classList.add('active'); });
-    });
+    item.querySelectorAll('.edit-ressenti').forEach(btn => { btn.addEventListener('click', () => { item.querySelectorAll('.edit-ressenti').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }); });
     const nameIn = item.querySelector('.edit-ex-name'), groupIn = item.querySelector('.edit-ex-group');
     nameIn.addEventListener('change', () => { if (EXERCISE_TO_GROUP[nameIn.value.trim()]) groupIn.value = EXERCISE_TO_GROUP[nameIn.value.trim()]; });
   });
@@ -605,22 +555,19 @@ function viewSession(id) {
     session.energy = eb2 ? parseFloat(eb2.dataset.value) : session.energy;
     const newEx = [];
     panel.querySelectorAll('.exercise-form-item').forEach(item => {
-      const n = item.querySelector('.edit-ex-name').value.trim();
-      const g = item.querySelector('.edit-ex-group').value.trim() || EXERCISE_TO_GROUP[n] || '';
-      const c = parseFloat(item.querySelector('.edit-ex-charge').value) || 0;
-      const s = parseInt(item.querySelector('.edit-ex-series').value) || 3;
-      const r = parseInt(item.querySelector('.edit-ex-reps').value) || 10;
+      const n = item.querySelector('.edit-ex-name').value.trim(), g = item.querySelector('.edit-ex-group').value.trim() || EXERCISE_TO_GROUP[n] || '';
+      const c = parseFloat(item.querySelector('.edit-ex-charge').value) || 0, s = parseInt(item.querySelector('.edit-ex-series').value) || 3, r = parseInt(item.querySelector('.edit-ex-reps').value) || 10;
       const rb = item.querySelector('.edit-ressenti.active');
       if (n) newEx.push({ name: n, group: g, charge: c, series: s, reps: r, ressenti: rb ? parseInt(rb.dataset.value) : 3 });
     });
     session.exercises = newEx;
     state.sessions.sort((a, b) => a.date.localeCompare(b.date));
-    saveSessions(); closePanel(); renderAll(); showToast('Séance modifiée');
+    saveSessions(); upsertSessionToSupabase(session); closePanel(); renderAll(); showToast('Séance modifiée');
   });
   document.getElementById('btn-del').addEventListener('click', () => {
     if (!confirm('Supprimer ' + session.id + ' ?')) return;
     state.sessions = state.sessions.filter(s => s.id !== id);
-    saveSessions(); closePanel(); renderAll(); showToast('Supprimée');
+    saveSessions(); deleteSessionFromSupabase(id); closePanel(); renderAll(); showToast('Supprimée');
   });
   document.getElementById('pc').addEventListener('click', closePanel);
   overlay.classList.add('active'); panel.classList.add('active'); overlay.onclick = closePanel;
@@ -632,45 +579,30 @@ function viewSession(id) {
 // ============================================================
 function openExerciseDetail(ex) {
   const panel = document.getElementById('panel'), overlay = document.getElementById('panel-overlay');
-  const maxC = getMaxCharges();
-  const prog = getExerciseProgression(ex.name);
+  const maxC = getMaxCharges(), prog = getExerciseProgression(ex.name);
   const best = maxC[ex.name] ? `${maxC[ex.name]} kg` : '\u2014';
   const execution = EXERCISE_EXECUTION[ex.name] || '';
   const videoKey = ex.name.toLowerCase();
   const videoUrl = EXERCISE_VIDEOS[videoKey] || Object.entries(EXERCISE_VIDEOS).find(([k]) => videoKey.includes(k))?.[1] || '';
-
-  // Last 5 performances table
   const last5 = prog.slice(-5).reverse();
-  const perfTable = last5.length ? `<div class="panel-section"><h3>Dernières performances</h3>
-    <table class="last-perfs-table"><thead><tr><th>Date</th><th>Charge</th><th>Séries</th><th>Ressenti</th></tr></thead>
-    <tbody>${last5.map(p => `<tr><td>${fmtDate(p.date)}</td><td>${p.charge}kg</td><td>${p.series}\u00d7${p.reps}</td><td>${p.ressenti}/5</td></tr>`).join('')}</tbody></table></div>` : '';
+  const perfTable = last5.length ? `<div class="panel-section"><h3>Dernières performances</h3><table class="last-perfs-table"><thead><tr><th>Date</th><th>Charge</th><th>Séries</th><th>Ressenti</th></tr></thead><tbody>${last5.map(p => `<tr><td>${fmtDate(p.date)}</td><td>${p.charge}kg</td><td>${p.series}\u00d7${p.reps}</td><td>${p.ressenti}/5</td></tr>`).join('')}</tbody></table></div>` : '';
 
-  panel.innerHTML = `
-    <div class="panel-handle"></div>
-    <button class="panel-close" id="pc">\u2715</button>
-    <h2>${ex.name}</h2>
-    <span class="panel-priority" style="background:var(--accent-bg);color:var(--accent)">${ex.group}</span>
+  panel.innerHTML = `<div class="panel-handle"></div><button class="panel-close" id="pc">\u2715</button>
+    <h2>${ex.name}</h2><span class="panel-priority" style="background:var(--accent-bg);color:var(--accent)">${ex.group}</span>
     <div class="panel-section"><h3>Mon record</h3><p style="font-size:1.3rem;font-weight:700">${best}</p><p class="text-sm text-muted">${prog.length} entrée${prog.length > 1 ? 's' : ''}</p></div>
     ${prog.length > 1 ? '<canvas id="exo-detail-chart" style="width:100%;max-height:150px;margin-top:12px"></canvas>' : ''}
     ${execution ? `<div class="panel-section"><h3>Exécution parfaite</h3><p>${execution}</p></div>` : ''}
-    ${videoUrl ? `<div class="panel-section"><a href="${videoUrl}" target="_blank" rel="noopener" class="btn-pill" style="display:inline-flex;gap:6px;align-items:center;padding:10px 16px;font-size:0.85rem">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
-      Voir sur MuscleWiki</a></div>` : ''}
-    ${perfTable}
-  `;
-
+    ${videoUrl ? `<div class="panel-section"><a href="${videoUrl}" target="_blank" rel="noopener" class="btn-pill" style="display:inline-flex;gap:6px;align-items:center;padding:10px 16px;font-size:0.85rem"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Voir sur MuscleWiki</a></div>` : ''}
+    ${perfTable}`;
   document.getElementById('pc').addEventListener('click', closePanel);
-  overlay.classList.add('active'); panel.classList.add('active');
-  overlay.onclick = closePanel;
+  overlay.classList.add('active'); panel.classList.add('active'); overlay.onclick = closePanel;
   setupPanelDrag(panel);
-
   if (prog.length > 1) {
     setTimeout(() => {
       const cv = document.getElementById('exo-detail-chart'); if (!cv) return;
-      const volData = prog.map(p => p.charge * p.series * p.reps);
       new Chart(cv.getContext('2d'), {
         type: 'line',
-        data: { labels: prog.map(p => fmtDate(p.date)), datasets: [{ label: 'Volume load', data: volData, borderColor: '#5856d6', backgroundColor: 'rgba(88,86,214,.08)', borderWidth: 2, fill: true, tension: .3, pointRadius: 3, pointBackgroundColor: '#5856d6' }] },
+        data: { labels: prog.map(p => fmtDate(p.date)), datasets: [{ label: 'Volume load', data: prog.map(p => p.charge * p.series * p.reps), borderColor: '#6C63FF', backgroundColor: 'rgba(108,99,255,.08)', borderWidth: 2, fill: true, tension: .3, pointRadius: 3, pointBackgroundColor: '#6C63FF' }] },
         options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, scales: { x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 } } }, y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2' } } }, plugins: { legend: { display: false } } }
       });
     }, 120);
@@ -680,11 +612,7 @@ function openExerciseDetail(ex) {
 // ============================================================
 // PANEL & DRAG
 // ============================================================
-function closePanel() {
-  document.getElementById('panel').classList.remove('active');
-  document.getElementById('panel-overlay').classList.remove('active');
-}
-
+function closePanel() { document.getElementById('panel').classList.remove('active'); document.getElementById('panel-overlay').classList.remove('active'); }
 function setupPanelDrag(panel) {
   let startY = 0, curY = 0, dragging = false;
   panel.addEventListener('touchstart', e => { if (panel.scrollTop > 5) return; startY = e.touches[0].clientY; dragging = true; panel.style.transition = 'none'; }, { passive: true });
@@ -710,10 +638,7 @@ function renderBodyModel() {
   const c = document.getElementById('body-model-root'); if (!c) return;
   const data = buildBodyData(), type = state.bodyView === 'front' ? 'anterior' : 'posterior';
   if (state.bodyHL) { state.bodyHL.update({ data, type }); }
-  else {
-    c.innerHTML = '';
-    state.bodyHL = createBodyHighlighter({ container: c, data, type, style: { width: '100%', maxWidth: '280px', margin: '0 auto' }, bodyColor: '#d1d5db', highlightedColors: ['#c7d2fe', '#818cf8', '#6366f1', '#4338ca'], onClick: ({ muscle }) => { if (muscle) openMusclePanel(muscle); } });
-  }
+  else { c.innerHTML = ''; state.bodyHL = createBodyHighlighter({ container: c, data, type, style: { width: '100%', maxWidth: '280px', margin: '0 auto' }, bodyColor: '#d1d5db', highlightedColors: ['#c7d2fe', '#818cf8', '#6366f1', '#4338ca'], onClick: ({ muscle }) => { if (muscle) openMusclePanel(muscle); } }); }
 }
 function renderBodyLegend() {
   const el = document.getElementById('body-legend'); if (!el) return;
@@ -723,9 +648,7 @@ function setupBodyToggle() {
   document.getElementById('body-toggle')?.addEventListener('click', e => {
     const btn = e.target.closest('.seg-btn'); if (!btn) return;
     document.querySelectorAll('#body-toggle .seg-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    state.bodyView = btn.dataset.view;
-    renderBodyModel();
+    btn.classList.add('active'); state.bodyView = btn.dataset.view; renderBodyModel();
   });
 }
 
@@ -736,70 +659,37 @@ function openMusclePanel(muscleId) {
   const guide = MUSCLE_GUIDES[muscleId]; if (!guide) return;
   const panel = document.getElementById('panel'), overlay = document.getElementById('panel-overlay');
   const prioLabel = { critical: 'Priorité critique', high: 'Priorité haute', medium: 'Priorité moyenne', maintenance: 'Maintenance', low: 'Priorité basse' }[guide.priority] || '';
-  const prioColor = { critical: 'background:#fce7f3;color:#e11d48', high: 'background:rgba(255,149,0,.1);color:#ff9500', medium: 'background:rgba(88,86,214,.08);color:#5856d6', maintenance: 'background:rgba(0,0,0,.04);color:#636366', low: 'background:rgba(0,0,0,.03);color:#aeaeb2' }[guide.priority] || '';
+  const prioColor = { critical: 'background:#fce7f3;color:#e11d48', high: 'background:rgba(255,159,10,.1);color:#FF9F0A', medium: 'background:rgba(108,99,255,.08);color:#6C63FF', maintenance: 'background:rgba(0,0,0,.04);color:#636366', low: 'background:rgba(0,0,0,.03);color:#aeaeb2' }[guide.priority] || '';
   const exList = (guide.exercises || []).map(ex => `<div class="panel-exo-tag"><span style="flex:1">${ex.name}</span><span>${ex.sets}</span></div>`).join('') || '<p class="text-muted text-sm">Pas d\'exercice direct.</p>';
-  const histHTML = buildMuscleHistory(muscleId);
-  const subdivHTML = buildSubdivisions(muscleId);
-
-  panel.innerHTML = `<div class="panel-handle"></div><button class="panel-close" id="pc">\u2715</button>
-    <h2>${guide.title}</h2><span class="panel-priority" style="${prioColor}">${prioLabel}</span>
-    ${subdivHTML}${histHTML}
-    <div class="panel-section"><h3>Anatomie</h3><p>${guide.anatomy}</p></div>
-    <div class="panel-section"><h3>Pourquoi</h3><p>${guide.why}</p></div>
-    <div class="panel-section"><h3>Volume cible</h3><p>${guide.volumeTarget}</p></div>
-    <div class="panel-section"><h3>Exercices recommandés</h3><div class="panel-exo-list">${exList}</div></div>
-    ${guide.avoid ? `<div class="panel-avoid"><strong>À éviter :</strong> ${guide.avoid}</div>` : ''}`;
+  const histHTML = buildMuscleHistory(muscleId), subdivHTML = buildSubdivisions(muscleId);
+  panel.innerHTML = `<div class="panel-handle"></div><button class="panel-close" id="pc">\u2715</button><h2>${guide.title}</h2><span class="panel-priority" style="${prioColor}">${prioLabel}</span>${subdivHTML}${histHTML}<div class="panel-section"><h3>Anatomie</h3><p>${guide.anatomy}</p></div><div class="panel-section"><h3>Pourquoi</h3><p>${guide.why}</p></div><div class="panel-section"><h3>Volume cible</h3><p>${guide.volumeTarget}</p></div><div class="panel-section"><h3>Exercices recommandés</h3><div class="panel-exo-list">${exList}</div></div>${guide.avoid ? `<div class="panel-avoid"><strong>À éviter :</strong> ${guide.avoid}</div>` : ''}`;
   document.getElementById('pc').addEventListener('click', closePanel);
   overlay.classList.add('active'); panel.classList.add('active'); overlay.onclick = closePanel;
   setupPanelDrag(panel);
   setTimeout(() => renderMusclePanelChart(muscleId), 100);
 }
-
 function buildMuscleHistory(muscleId) {
   const exercises = getExercisesForMuscle(muscleId);
   if (!exercises.length) return '<div class="panel-section"><h3>Historique</h3><p class="text-muted text-sm">Aucune donnée.</p></div>';
-  const byName = {};
-  exercises.forEach(ex => { if (!byName[ex.name]) byName[ex.name] = []; byName[ex.name].push(ex); });
-  const totalSets = exercises.reduce((s, e) => s + e.series, 0);
-  const nbSess = new Set(exercises.map(e => e.sessionId)).size;
-  const rows = Object.entries(byName).map(([name, entries]) => {
-    const f = entries[0].charge, l = entries[entries.length - 1].charge;
-    const pct = f > 0 ? Math.round(((l - f) / f) * 100) : 0;
-    return { name, f, l, pct, count: entries.length };
-  }).sort((a, b) => b.count - a.count);
-  return `<div class="panel-section"><h3>Historique</h3>
-    <div style="display:flex;gap:10px;margin-bottom:10px">
-      <div style="flex:1;text-align:center;padding:10px;background:rgba(0,0,0,.03);border-radius:10px"><div style="font-size:1.2rem;font-weight:700;color:var(--accent)">${nbSess}</div><div class="text-xs text-muted">Séances</div></div>
-      <div style="flex:1;text-align:center;padding:10px;background:rgba(0,0,0,.03);border-radius:10px"><div style="font-size:1.2rem;font-weight:700;color:var(--accent)">${totalSets}</div><div class="text-xs text-muted">Séries</div></div>
-    </div>
-    <canvas id="muscle-panel-chart" style="width:100%;max-height:160px;margin-bottom:10px"></canvas>
-    <div class="table-scroll"><table class="progress-table"><thead><tr><th>Exercice</th><th>Début</th><th>Actuel</th><th>Prog</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.name}</td><td>${r.f}kg</td><td>${r.l}kg</td><td><span class="badge ${r.pct > 0 ? 'badge-green' : r.pct < 0 ? 'badge-red' : 'badge-gray'}">${r.pct > 0 ? '+' : ''}${r.pct}%</span></td></tr>`).join('')}</tbody></table></div>
-  </div>`;
+  const byName = {}; exercises.forEach(ex => { if (!byName[ex.name]) byName[ex.name] = []; byName[ex.name].push(ex); });
+  const totalSets = exercises.reduce((s, e) => s + e.series, 0), nbSess = new Set(exercises.map(e => e.sessionId)).size;
+  const rows = Object.entries(byName).map(([name, entries]) => { const f = entries[0].charge, l = entries[entries.length - 1].charge; const pct = f > 0 ? Math.round(((l - f) / f) * 100) : 0; return { name, f, l, pct, count: entries.length }; }).sort((a, b) => b.count - a.count);
+  return `<div class="panel-section"><h3>Historique</h3><div style="display:flex;gap:10px;margin-bottom:10px"><div style="flex:1;text-align:center;padding:10px;background:rgba(0,0,0,.03);border-radius:10px"><div style="font-size:1.2rem;font-weight:700;color:var(--accent)">${nbSess}</div><div class="text-xs text-muted">Séances</div></div><div style="flex:1;text-align:center;padding:10px;background:rgba(0,0,0,.03);border-radius:10px"><div style="font-size:1.2rem;font-weight:700;color:var(--accent)">${totalSets}</div><div class="text-xs text-muted">Séries</div></div></div><canvas id="muscle-panel-chart" style="width:100%;max-height:160px;margin-bottom:10px"></canvas><div class="table-scroll"><table class="progress-table"><thead><tr><th>Exercice</th><th>Début</th><th>Actuel</th><th>Prog</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.name}</td><td>${r.f}kg</td><td>${r.l}kg</td><td><span class="badge ${r.pct > 0 ? 'badge-green' : r.pct < 0 ? 'badge-red' : 'badge-gray'}">${r.pct > 0 ? '+' : ''}${r.pct}%</span></td></tr>`).join('')}</tbody></table></div></div>`;
 }
-
 function renderMusclePanelChart(muscleId) {
   const canvas = document.getElementById('muscle-panel-chart'); if (!canvas) return;
-  const exercises = getExercisesForMuscle(muscleId);
-  const byName = {}; exercises.forEach(ex => { if (!byName[ex.name]) byName[ex.name] = []; byName[ex.name].push(ex); });
+  const exercises = getExercisesForMuscle(muscleId), byName = {};
+  exercises.forEach(ex => { if (!byName[ex.name]) byName[ex.name] = []; byName[ex.name].push(ex); });
   const top = Object.entries(byName).sort((a, b) => b[1].length - a[1].length).slice(0, 3);
-  const colors = ['#5856d6', '#ff9500', '#34c759'];
+  const colors = ['#6C63FF', '#FF9F0A', '#30D158'];
   const allDates = [...new Set(exercises.map(e => e.date))].sort();
-  new Chart(canvas.getContext('2d'), {
-    type: 'line',
-    data: { labels: allDates.map(fmtDate), datasets: top.map(([name, entries], i) => ({ label: name.length > 18 ? name.substring(0, 16) + '...' : name, data: entries.map(p => ({ x: fmtDate(p.date), y: p.charge })), borderColor: colors[i], borderWidth: 2, fill: false, tension: .3, pointRadius: 3, pointBackgroundColor: colors[i] })) },
-    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, scales: { x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 } } }, y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2', font: { size: 10 } } } }, plugins: { legend: { labels: { color: '#636366', font: { size: 10 }, usePointStyle: true } }, tooltip: { animation: { duration: 100 } } } }
-  });
+  new Chart(canvas.getContext('2d'), { type: 'line', data: { labels: allDates.map(fmtDate), datasets: top.map(([name, entries], i) => ({ label: name.length > 18 ? name.substring(0, 16) + '...' : name, data: entries.map(p => ({ x: fmtDate(p.date), y: p.charge })), borderColor: colors[i], borderWidth: 2, fill: false, tension: .3, pointRadius: 3, pointBackgroundColor: colors[i] })) }, options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, scales: { x: { grid: { display: false }, ticks: { color: '#aeaeb2', font: { size: 9 } } }, y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { color: '#aeaeb2', font: { size: 10 } } } }, plugins: { legend: { labels: { color: '#636366', font: { size: 10 }, usePointStyle: true } }, tooltip: { animation: { duration: 100 } } } } });
 }
-
 function buildSubdivisions(muscleId) {
   const s = MUSCLE_SUBDIVISIONS[muscleId]; if (!s) return '';
   const allEx = getExercisesForMuscle(muscleId), byN = {};
   allEx.forEach(ex => { byN[ex.name] = (byN[ex.name] || 0) + ex.series; });
-  return `<div class="panel-section"><h3>Portions — ${s.name}</h3>${s.portions.map(p => {
-    const sets = p.exercises.reduce((sum, e) => sum + (byN[e] || 0), 0);
-    const matched = p.exercises.filter(e => byN[e]);
-    return `<div class="subdiv-card"><div class="subdiv-header"><span class="subdiv-name">${p.name}</span><span class="subdiv-sets">${sets} séries</span></div><div class="subdiv-bar-bg"><div class="subdiv-bar" style="width:${Math.min(100, sets * 3)}%"></div></div>${matched.length ? `<div class="subdiv-tags">${matched.map(e => `<span class="subdiv-tag">${e}</span>`).join('')}</div>` : '<span class="text-xs text-muted">Pas encore travaillé</span>'}</div>`;
-  }).join('')}</div>`;
+  return `<div class="panel-section"><h3>Portions — ${s.name}</h3>${s.portions.map(p => { const sets = p.exercises.reduce((sum, e) => sum + (byN[e] || 0), 0); const matched = p.exercises.filter(e => byN[e]); return `<div class="subdiv-card"><div class="subdiv-header"><span class="subdiv-name">${p.name}</span><span class="subdiv-sets">${sets} séries</span></div><div class="subdiv-bar-bg"><div class="subdiv-bar" style="width:${Math.min(100, sets * 3)}%"></div></div>${matched.length ? `<div class="subdiv-tags">${matched.map(e => `<span class="subdiv-tag">${e}</span>`).join('')}</div>` : '<span class="text-xs text-muted">Pas encore travaillé</span>'}</div>`; }).join('')}</div>`;
 }
 
 // ============================================================
@@ -808,102 +698,50 @@ function buildSubdivisions(muscleId) {
 function renderEncyclopedieTab() {
   renderEditableProfile();
   renderBodyLegend();
-  setupBodyToggle();
   setTimeout(() => renderBodyModel(), 200);
   renderExercisesCatalog();
   renderScienceContent();
 }
 
-// Editable profile
 function renderEditableProfile() {
-  const p = USER_PROFILE;
-  const overrides = loadProfileOverrides();
-  const weight = overrides.weight ?? p.weight;
-  const calories = overrides.calories ?? p.nutrition.calories;
-  const protein = overrides.protein ?? p.nutrition.protein;
-  const supplements = overrides.supplements ?? p.nutrition.supplements;
-
-  // Weight sparkline
+  const p = USER_PROFILE, overrides = loadProfileOverrides();
+  const weight = overrides.weight ?? p.weight, calories = overrides.calories ?? p.nutrition.calories, protein = overrides.protein ?? p.nutrition.protein, supplements = overrides.supplements ?? p.nutrition.supplements;
   const wh = loadWeightHistory();
   let sparkSvg = '';
   if (wh.length >= 2) {
-    const vals = wh.slice(-10).map(w => w.weight);
-    const mn = Math.min(...vals), mx = Math.max(...vals), range = mx - mn || 1;
-    const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * 80},${20 - ((v - mn) / range) * 18}`).join(' ');
-    sparkSvg = `<svg class="weight-sparkline" width="80" height="22" viewBox="0 0 80 22"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
+    const vals = wh.slice(-10).map(w => w.weight), mn = Math.min(...vals), mx = Math.max(...vals), range = mx - mn || 1;
+    sparkSvg = `<svg class="weight-sparkline" width="80" height="22" viewBox="0 0 80 22"><polyline points="${vals.map((v, i) => `${(i / (vals.length - 1)) * 80},${20 - ((v - mn) / range) * 18}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
   }
-
   const grid = document.getElementById('profile-grid');
-  grid.innerHTML = `
-    <dt>Âge</dt><dd>${p.age} ans</dd>
-    <dt>Taille</dt><dd>${p.height} cm</dd>
-    <dt>Poids</dt><dd><span class="profile-editable" data-field="weight">${weight} kg</span>${sparkSvg}</dd>
-    <dt>Morpho</dt><dd>${p.morphology}</dd>
-    <dt>Objectif</dt><dd>${p.objective}</dd>
-    <dt>Calories</dt><dd><span class="profile-editable" data-field="calories">${calories}</span></dd>
-    <dt>Protéines</dt><dd><span class="profile-editable" data-field="protein">${protein}</span></dd>
-    <dt>Suppléments</dt><dd><span class="profile-editable" data-field="supplements">${supplements}</span></dd>`;
-
+  grid.innerHTML = `<dt>Âge</dt><dd>${p.age} ans</dd><dt>Taille</dt><dd>${p.height} cm</dd><dt>Poids</dt><dd><span class="profile-editable" data-field="weight">${weight} kg</span>${sparkSvg}</dd><dt>Morpho</dt><dd>${p.morphology}</dd><dt>Objectif</dt><dd>${p.objective}</dd><dt>Calories</dt><dd><span class="profile-editable" data-field="calories">${calories}</span></dd><dt>Protéines</dt><dd><span class="profile-editable" data-field="protein">${protein}</span></dd><dt>Suppléments</dt><dd><span class="profile-editable" data-field="supplements">${supplements}</span></dd>`;
   grid.querySelectorAll('.profile-editable').forEach(el => {
     el.addEventListener('click', () => {
       if (el.querySelector('input')) return;
-      const field = el.dataset.field;
-      const current = el.textContent.replace(' kg', '').trim();
-      const input = document.createElement('input');
-      input.className = 'profile-edit-input';
-      input.value = current;
+      const field = el.dataset.field, current = el.textContent.replace(' kg', '').trim();
+      const input = document.createElement('input'); input.className = 'profile-edit-input'; input.value = current;
       if (field === 'weight') input.type = 'number';
-      el.textContent = '';
-      el.appendChild(input);
-      input.focus();
-      const save = () => {
-        const val = input.value.trim();
-        if (!val) { renderEditableProfile(); return; }
-        const overrides = loadProfileOverrides();
-        if (field === 'weight') {
-          overrides.weight = parseFloat(val);
-          const wh = loadWeightHistory();
-          wh.push({ date: new Date().toISOString().split('T')[0], weight: parseFloat(val) });
-          saveWeightHistory(wh);
-        } else {
-          overrides[field] = val;
-        }
-        saveProfileOverrides(overrides);
-        renderEditableProfile();
-      };
-      input.addEventListener('blur', save);
-      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+      el.textContent = ''; el.appendChild(input); input.focus();
+      const save = () => { const val = input.value.trim(); if (!val) { renderEditableProfile(); return; } const o = loadProfileOverrides(); if (field === 'weight') { o.weight = parseFloat(val); const wh = loadWeightHistory(); wh.push({ date: new Date().toISOString().split('T')[0], weight: parseFloat(val) }); saveWeightHistory(wh); } else { o[field] = val; } saveProfileOverrides(o); renderEditableProfile(); };
+      input.addEventListener('blur', save); input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
     });
   });
 }
 
-// Exercises catalog
 function renderExercisesCatalog() {
-  const container = document.getElementById('exercises-catalog');
-  const bySession = {};
+  const container = document.getElementById('exercises-catalog'), bySession = {};
   PLANNING[0].sessions.forEach(session => { bySession[session.name] = session.exercises; });
   let html = '';
   Object.entries(bySession).forEach(([sessionName, exercises]) => {
-    const typeColors = { 'Session A': '#5856d6', 'Session B': '#ff9500', 'Session C': '#34c759' };
-    const color = Object.entries(typeColors).find(([k]) => sessionName.includes(k))?.[1] || '#5856d6';
+    const typeColors = { 'Session A': '#6C63FF', 'Session B': '#FF9F0A', 'Session C': '#30D158' };
+    const color = Object.entries(typeColors).find(([k]) => sessionName.includes(k))?.[1] || '#6C63FF';
     html += `<div class="exo-section-title" style="color:${color}">${sessionName}</div><div class="exo-grid">`;
-    exercises.forEach(ex => {
-      html += `<div class="exo-item" data-exo="${encodeURIComponent(JSON.stringify(ex))}">
-        <div class="exo-item-info"><div class="exo-item-name">${ex.name}</div><div class="exo-item-group">${ex.group}</div></div>
-        <div class="exo-item-arrow">\u203A</div></div>`;
-    });
+    exercises.forEach(ex => { html += `<div class="exo-item" data-exo="${encodeURIComponent(JSON.stringify(ex))}"><div class="exo-item-info"><div class="exo-item-name">${ex.name}</div><div class="exo-item-group">${ex.group}</div></div><div class="exo-item-arrow">\u203A</div></div>`; });
     html += '</div>';
   });
   container.innerHTML = html;
-  container.querySelectorAll('.exo-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const ex = JSON.parse(decodeURIComponent(item.dataset.exo));
-      openExerciseDetail(ex);
-    });
-  });
+  container.querySelectorAll('.exo-item').forEach(item => { item.addEventListener('click', () => openExerciseDetail(JSON.parse(decodeURIComponent(item.dataset.exo)))); });
 }
 
-// Science content
 function renderScienceContent() {
   const rs = s => `<div class="science-section"><h2>${s.title}</h2>${s.points.map(pt => `<div class="science-point"><h4>${pt.title}</h4><p>${pt.text}</p>${pt.source ? `<div class="science-source">${pt.source}</div>` : ''}</div>`).join('')}</div>`;
   const dp = SCIENCE_CONTENT.doubleProgression;

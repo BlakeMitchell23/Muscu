@@ -110,7 +110,7 @@ const INITIAL_SESSIONS = [
     {"name":"Abdominal Crunch ELT+","group":"Abdos","charge":45,"series":3,"reps":12,"ressenti":4},
     {"name":"Arm Curl inversé","group":"Avant-bras","charge":5,"series":3,"reps":15,"ressenti":5}
   ]},
-  {"id":"S14","date":"2026-03-27","energy":3,"exercises":[
+  {"id":"S13","date":"2026-03-27","energy":3,"exercises":[
     {"name":"Abdominal Crunch ELT+","group":"Abdos","charge":30,"series":2,"reps":12,"ressenti":1},
     {"name":"Leg Press ELT+","group":"Quadriceps","charge":110,"series":3,"reps":10,"ressenti":1},
     {"name":"Vertical Traction","group":"Dos_largeur","charge":45,"series":3,"reps":10,"ressenti":3},
@@ -121,7 +121,7 @@ const INITIAL_SESSIONS = [
     {"name":"Arm Curl (haltères)","group":"Biceps","charge":10,"series":2,"reps":5,"ressenti":4},
     {"name":"Arm Curl inversé (haltères)","group":"Avant-bras","charge":5,"series":2,"reps":10,"ressenti":3}
   ]},
-  {"id":"S15","date":"2026-03-29","energy":4,"exercises":[
+  {"id":"S14","date":"2026-03-29","energy":4,"exercises":[
     {"name":"Chest Press","group":"Pectoraux","charge":35,"series":4,"reps":10,"ressenti":3},
     {"name":"Shoulder Press","group":"Épaules","charge":20,"series":4,"reps":10,"ressenti":4},
     {"name":"Dips (poids de corps)","group":"Pectoraux","charge":0,"series":3,"reps":4,"ressenti":4.5},
@@ -129,7 +129,7 @@ const INITIAL_SESSIONS = [
     {"name":"Arm Extension (triceps)","group":"Triceps","charge":20,"series":3,"reps":12,"ressenti":4},
     {"name":"Abdominal Crunch ELT+","group":"Abdos","charge":40,"series":3,"reps":12,"ressenti":3}
   ]},
-  {"id":"S16","date":"2026-04-01","energy":3.5,"exercises":[
+  {"id":"S15","date":"2026-04-01","energy":3.5,"exercises":[
     {"name":"Rowing assis","group":"Dos_épaisseur","charge":30,"series":4,"reps":12,"ressenti":3},
     {"name":"Shrugs haltères","group":"Trapèzes","charge":12,"series":3,"reps":15,"ressenti":4},
     {"name":"Arm Curl (haltères)","group":"Biceps","charge":10,"series":3,"reps":8,"ressenti":3.5},
@@ -137,13 +137,22 @@ const INITIAL_SESSIONS = [
     {"name":"Vertical Traction","group":"Dos_largeur","charge":50,"series":4,"reps":10,"ressenti":3},
     {"name":"Arm Curl inversé (haltères)","group":"Avant-bras","charge":5,"series":3,"reps":10,"ressenti":4}
   ]},
-  {"id":"S17","date":"2026-04-04","energy":4,"exercises":[
+  {"id":"S16","date":"2026-04-04","energy":4,"exercises":[
     {"name":"Shoulder Press","group":"Épaules","charge":20,"series":4,"reps":10,"ressenti":2.5},
     {"name":"Chest Press","group":"Pectoraux","charge":35,"series":4,"reps":10,"ressenti":3},
     {"name":"Élévations latérales câble","group":"Delt_latéral","charge":2.5,"series":3,"reps":12,"ressenti":4},
     {"name":"Dips (poids de corps)","group":"Pectoraux","charge":0,"series":3,"reps":5,"ressenti":5},
     {"name":"Abdominal Crunch ELT+","group":"Abdos","charge":45,"series":3,"reps":12,"ressenti":4},
     {"name":"Arm Extension (triceps)","group":"Triceps","charge":20,"series":3,"reps":12,"ressenti":4}
+  ]},
+  {"id":"S17","date":"2026-04-07","energy":4,"exercises":[
+    {"name":"Leg Press ELT+","group":"Quadriceps","charge":140,"series":3,"reps":12,"ressenti":3},
+    {"name":"Leg Curl ELT+","group":"Ischio","charge":40,"series":3,"reps":12,"ressenti":3},
+    {"name":"Chest Press","group":"Pectoraux","charge":35,"series":3,"reps":10,"ressenti":3},
+    {"name":"Vertical Traction","group":"Dos_largeur","charge":50,"series":3,"reps":10,"ressenti":3},
+    {"name":"Rowing assis","group":"Dos_épaisseur","charge":30,"series":3,"reps":12,"ressenti":3},
+    {"name":"Élévations latérales câble","group":"Delt_latéral","charge":5,"series":3,"reps":12,"ressenti":4},
+    {"name":"Reverse Flyes","group":"Delt_postérieur","charge":10,"series":3,"reps":15,"ressenti":4}
   ]}
 ];
 
