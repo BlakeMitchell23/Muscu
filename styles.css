@@ -192,7 +192,7 @@ body{font-family:'Inter',-apple-system,'SF Pro Display',BlinkMacSystemFont,sans-
 .seance-exo-name-input:focus{outline:none;box-shadow:0 0 0 3px rgba(108,99,255,0.15);background:rgba(0,0,0,0.02)}
 .seance-add-exo{display:block;margin:12px auto 0;font-size:0.82rem}
 .seance-save-btn{position:sticky;bottom:calc(52px + env(safe-area-inset-bottom,0px) + 8px);width:100%;min-height:50px;z-index:50;box-shadow:0 -4px 16px rgba(0,0,0,0.08)}
-.seance-save-spacer{height:16px}
+.seance-save-spacer{height:70px}
 .seance-screen2{overflow-y:auto}
 .seance-screen2.hidden{display:none}
 @keyframes slideInRight{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}

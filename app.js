@@ -17,10 +17,14 @@ async function syncFromSupabase() {
   if (!supabase) return;
   try {
     const { data, error } = await supabase.from('sessions').select('*').order('date', { ascending: true });
-    if (!error && data && data.length) {
+    if (error) return;
+    if (data && data.length) {
       state.sessions = data.map(row => ({ id: row.id, date: row.date, energy: row.energy, exercises: typeof row.exercises === 'string' ? JSON.parse(row.exercises) : row.exercises }));
-      saveSessions();
+      localStorage.setItem('muscu_sessions', JSON.stringify(state.sessions));
       renderAll();
+    } else {
+      // Supabase is empty — push local data up
+      await pushAllToSupabase();
     }
   } catch(e) { /* silent */ }
 }
@@ -28,9 +32,8 @@ async function syncFromSupabase() {
 async function pushAllToSupabase() {
   if (!supabase) return;
   try {
-    for (const s of state.sessions) {
-      await supabase.from('sessions').upsert({ id: s.id, date: s.date, energy: s.energy, exercises: JSON.stringify(s.exercises) }, { onConflict: 'id' });
-    }
+    const rows = state.sessions.map(s => ({ id: s.id, date: s.date, energy: s.energy, exercises: JSON.stringify(s.exercises) }));
+    await supabase.from('sessions').upsert(rows, { onConflict: 'id' });
   } catch(e) { /* silent */ }
 }
 
@@ -47,7 +50,7 @@ async function deleteSessionFromSupabase(id) {
 }
 
 // ---- INIT ----
-function init() {
+async function init() {
   loadSessions();
   setupTabs();
   setupEnergySelector();
@@ -57,7 +60,7 @@ function init() {
   setupVoirTout();
   populateDataLists();
   renderAll();
-  syncFromSupabase();
+  await syncFromSupabase();
 }
 
 function renderAll() {
@@ -75,7 +78,6 @@ function loadSessions() {
 }
 function saveSessions() {
   localStorage.setItem('muscu_sessions', JSON.stringify(state.sessions));
-  pushAllToSupabase();
 }
 
 function loadProfileOverrides() { const s = localStorage.getItem('muscu_profile_overrides'); return s ? JSON.parse(s) : {}; }
@@ -519,23 +521,28 @@ function viewSession(id) {
   const ressentiBtns = v => [1, 2, 3, 4, 5].map(r => `<button type="button" class="ressenti-btn edit-ressenti ${r === Math.round(v) ? 'active' : ''}" data-value="${r}">${r}</button>`).join('');
 
   panel.innerHTML = `<div class="panel-handle"></div><button class="panel-close" id="pc">\u2715</button>
-    <h2>${session.id}</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0">
-      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input edit-date" value="${session.date}"></div>
-      <div class="form-group"><label class="form-label">Énergie</label><div class="energy-selector" style="gap:3px">${energyBtns}</div></div>
+    <h2>${session.id} — ${fmtDate(session.date)}</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;margin:10px 0">
+      <input type="date" class="form-input edit-date" value="${session.date}">
+      <div class="energy-selector" style="gap:6px">${energyBtns}</div>
     </div>
     <div class="panel-section"><h3>Exercices</h3>
-      ${session.exercises.map((ex, i) => `<div class="exercise-form-item" data-idx="${i}" style="margin-bottom:8px">
-        <button type="button" class="exercise-form-remove edit-remove-ex" data-idx="${i}">\u2715</button>
-        <div class="form-group"><label class="form-label">Exercice</label><input type="text" class="form-input edit-ex-name" list="exercise-names" value="${ex.name}"></div>
-        <input type="hidden" class="edit-ex-group" value="${ex.group}">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-          <div class="form-group"><label class="form-label">Charge</label><input type="number" class="form-input edit-ex-charge" value="${ex.charge}" min="0" step="0.5"></div>
-          <div class="form-group"><label class="form-label">Séries</label><input type="number" class="form-input edit-ex-series" value="${ex.series}" min="1" max="10"></div>
-          <div class="form-group"><label class="form-label">Reps</label><input type="number" class="form-input edit-ex-reps" value="${ex.reps}" min="1" max="50"></div>
+      <div id="edit-exercises-list">
+      ${session.exercises.map((ex, i) => `<div class="seance-exo-row edit-exo-row" data-idx="${i}">
+        <div class="seance-exo-line1">
+          <input type="text" class="seance-exo-name-input edit-ex-name" list="exercise-names" value="${ex.name}">
+          <button type="button" class="seance-exo-remove edit-remove-ex">\u2715</button>
         </div>
-        <div class="form-group"><label class="form-label">Ressenti</label><div class="ressenti-selector">${ressentiBtns(ex.ressenti)}</div></div>
+        <input type="hidden" class="edit-ex-group" value="${ex.group}">
+        <div class="seance-exo-line2"><span class="edit-ex-group-label">${ex.group}</span></div>
+        <div class="seance-exo-line3">
+          <input type="number" class="seance-exo-charge edit-ex-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${ex.charge}">
+          <input type="number" class="seance-exo-field edit-ex-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${ex.series}">
+          <input type="number" class="seance-exo-field edit-ex-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${ex.reps}">
+          <div class="seance-exo-ressenti">${ressentiBtns(ex.ressenti)}</div>
+        </div>
       </div>`).join('')}
+      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn-primary" style="flex:1" id="btn-save-edit">Sauvegarder</button>
@@ -543,18 +550,18 @@ function viewSession(id) {
     </div>`;
 
   panel.querySelectorAll('.edit-energy-btn').forEach(btn => { btn.addEventListener('click', () => { panel.querySelectorAll('.edit-energy-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }); });
-  panel.querySelectorAll('.exercise-form-item').forEach(item => {
+  panel.querySelectorAll('.edit-exo-row').forEach(item => {
     item.querySelectorAll('.edit-ressenti').forEach(btn => { btn.addEventListener('click', () => { item.querySelectorAll('.edit-ressenti').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }); });
-    const nameIn = item.querySelector('.edit-ex-name'), groupIn = item.querySelector('.edit-ex-group');
-    nameIn.addEventListener('change', () => { if (EXERCISE_TO_GROUP[nameIn.value.trim()]) groupIn.value = EXERCISE_TO_GROUP[nameIn.value.trim()]; });
+    const nameIn = item.querySelector('.edit-ex-name'), groupIn = item.querySelector('.edit-ex-group'), groupLabel = item.querySelector('.edit-ex-group-label');
+    nameIn.addEventListener('change', () => { const g = EXERCISE_TO_GROUP[nameIn.value.trim()]; if (g) { groupIn.value = g; groupLabel.textContent = g; } });
   });
-  panel.querySelectorAll('.edit-remove-ex').forEach(btn => { btn.addEventListener('click', () => btn.closest('.exercise-form-item').remove()); });
+  panel.querySelectorAll('.edit-remove-ex').forEach(btn => { btn.addEventListener('click', () => btn.closest('.edit-exo-row').remove()); });
   document.getElementById('btn-save-edit').addEventListener('click', () => {
     session.date = panel.querySelector('.edit-date').value;
     const eb2 = panel.querySelector('.edit-energy-btn.active');
     session.energy = eb2 ? parseFloat(eb2.dataset.value) : session.energy;
     const newEx = [];
-    panel.querySelectorAll('.exercise-form-item').forEach(item => {
+    panel.querySelectorAll('.edit-exo-row').forEach(item => {
       const n = item.querySelector('.edit-ex-name').value.trim(), g = item.querySelector('.edit-ex-group').value.trim() || EXERCISE_TO_GROUP[n] || '';
       const c = parseFloat(item.querySelector('.edit-ex-charge').value) || 0, s = parseInt(item.querySelector('.edit-ex-series').value) || 3, r = parseInt(item.querySelector('.edit-ex-reps').value) || 10;
       const rb = item.querySelector('.edit-ressenti.active');
