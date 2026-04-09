@@ -80,10 +80,7 @@ function saveSessions() {
   localStorage.setItem('muscu_sessions', JSON.stringify(state.sessions));
 }
 
-function loadProfileOverrides() { const s = localStorage.getItem('muscu_profile_overrides'); return s ? JSON.parse(s) : {}; }
-function saveProfileOverrides(o) { localStorage.setItem('muscu_profile_overrides', JSON.stringify(o)); }
-function loadWeightHistory() { const s = localStorage.getItem('muscu_weight_history'); return s ? JSON.parse(s) : []; }
-function saveWeightHistory(h) { localStorage.setItem('muscu_weight_history', JSON.stringify(h)); }
+
 
 // ---- TABS ----
 function setupTabs() {
@@ -724,35 +721,9 @@ function buildSubdivisions(muscleId) {
 // ENCYCLOPÉDIE TAB
 // ============================================================
 function renderEncyclopedieTab() {
-  renderEditableProfile();
   renderBodyLegend();
   setTimeout(() => renderBodyModel(), 200);
   renderExercisesCatalog();
-  renderScienceContent();
-}
-
-function renderEditableProfile() {
-  const p = USER_PROFILE, overrides = loadProfileOverrides();
-  const weight = overrides.weight ?? p.weight, calories = overrides.calories ?? p.nutrition.calories, protein = overrides.protein ?? p.nutrition.protein, supplements = overrides.supplements ?? p.nutrition.supplements;
-  const wh = loadWeightHistory();
-  let sparkSvg = '';
-  if (wh.length >= 2) {
-    const vals = wh.slice(-10).map(w => w.weight), mn = Math.min(...vals), mx = Math.max(...vals), range = mx - mn || 1;
-    sparkSvg = `<svg class="weight-sparkline" width="80" height="22" viewBox="0 0 80 22"><polyline points="${vals.map((v, i) => `${(i / (vals.length - 1)) * 80},${20 - ((v - mn) / range) * 18}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
-  }
-  const grid = document.getElementById('profile-grid');
-  grid.innerHTML = `<dt>Âge</dt><dd>${p.age} ans</dd><dt>Taille</dt><dd>${p.height} cm</dd><dt>Poids</dt><dd><span class="profile-editable" data-field="weight">${weight} kg</span>${sparkSvg}</dd><dt>Morpho</dt><dd>${p.morphology}</dd><dt>Objectif</dt><dd>${p.objective}</dd><dt>Calories</dt><dd><span class="profile-editable" data-field="calories">${calories}</span></dd><dt>Protéines</dt><dd><span class="profile-editable" data-field="protein">${protein}</span></dd><dt>Suppléments</dt><dd><span class="profile-editable" data-field="supplements">${supplements}</span></dd>`;
-  grid.querySelectorAll('.profile-editable').forEach(el => {
-    el.addEventListener('click', () => {
-      if (el.querySelector('input')) return;
-      const field = el.dataset.field, current = el.textContent.replace(' kg', '').trim();
-      const input = document.createElement('input'); input.className = 'profile-edit-input'; input.value = current;
-      if (field === 'weight') input.type = 'number';
-      el.textContent = ''; el.appendChild(input); input.focus();
-      const save = () => { const val = input.value.trim(); if (!val) { renderEditableProfile(); return; } const o = loadProfileOverrides(); if (field === 'weight') { o.weight = parseFloat(val); const wh = loadWeightHistory(); wh.push({ date: new Date().toISOString().split('T')[0], weight: parseFloat(val) }); saveWeightHistory(wh); } else { o[field] = val; } saveProfileOverrides(o); renderEditableProfile(); };
-      input.addEventListener('blur', save); input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
-    });
-  });
 }
 
 function renderExercisesCatalog() {
@@ -770,16 +741,6 @@ function renderExercisesCatalog() {
   container.querySelectorAll('.exo-item').forEach(item => { item.addEventListener('click', () => openExerciseDetail(JSON.parse(decodeURIComponent(item.dataset.exo)))); });
 }
 
-function renderScienceContent() {
-  const rs = s => `<div class="science-section"><h2>${s.title}</h2>${s.points.map(pt => `<div class="science-point"><h4>${pt.title}</h4><p>${pt.text}</p>${pt.source ? `<div class="science-source">${pt.source}</div>` : ''}</div>`).join('')}</div>`;
-  const dp = SCIENCE_CONTENT.doubleProgression;
-  document.getElementById('science-content').innerHTML =
-    rs(SCIENCE_CONTENT.hypertrophy) + rs(SCIENCE_CONTENT.nutrition) + rs(SCIENCE_CONTENT.recovery) +
-    `<div class="science-section"><h2>${dp.title}</h2><div class="card"><ol class="progression-steps">${dp.steps.map(s => `<li>${s}</li>`).join('')}</ol></div></div>` +
-    `<div class="science-section"><h2>Échelles</h2><div class="card"><table class="scale-table"><tr><th>Note</th><th>Ressenti</th><th>Action</th></tr>${SCIENCE_CONTENT.scales.ressenti.map(s => `<tr><td><span class="scale-value">${s.value}</span></td><td>${s.label}</td><td class="text-muted">${s.action}</td></tr>`).join('')}</table></div><div class="card" style="margin-top:8px"><table class="scale-table"><tr><th>Note</th><th>Énergie</th></tr>${SCIENCE_CONTENT.scales.energy.map(s => `<tr><td><span class="scale-value" style="background:${s.color};color:#fff">${s.value}</span></td><td>${s.label}</td></tr>`).join('')}</table></div></div>` +
-    `<div style="text-align:center;margin-top:20px"><button class="btn-ghost" id="btn-reset">Réinitialiser les données</button></div>`;
-  document.getElementById('btn-reset')?.addEventListener('click', () => { if (confirm('Réinitialiser toutes les données ?')) { localStorage.removeItem('muscu_sessions'); localStorage.removeItem('muscu_profile_overrides'); localStorage.removeItem('muscu_weight_history'); location.reload(); } });
-}
 
 function populateDataLists() {
   document.getElementById('exercise-names').innerHTML = EXERCISE_SUGGESTIONS.map(n => `<option value="${n}">`).join('');
