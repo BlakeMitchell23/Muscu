@@ -135,10 +135,10 @@ function getAllKnownExerciseNames() {
   return [...n].sort();
 }
 function getMaxCharges() { const m = {}; state.sessions.forEach(s => s.exercises.forEach(ex => { if (!m[ex.name] || ex.charge > m[ex.name]) m[ex.name] = ex.charge; })); return m; }
-function getLastChargeAndRessenti(name) {
+function getLastPerf(name) {
   for (let i = state.sessions.length - 1; i >= 0; i--) {
     const ex = state.sessions[i].exercises.find(e => e.name === name);
-    if (ex) return { charge: ex.charge, ressenti: ex.ressenti };
+    if (ex) return { charge: ex.charge, series: ex.series, reps: ex.reps, ressenti: ex.ressenti };
   }
   return null;
 }
@@ -200,12 +200,7 @@ function getTemplateExerciseNames(typeKey) { const s = PLANNING[0].sessions.find
 // ---- RECENT PRs ----
 
 // ---- CHARGE SUGGESTION ----
-function getSuggestion(name) {
-  const data = getLastChargeAndRessenti(name);
-  if (!data || !data.charge) return null;
-  if (data.ressenti <= 2) return +(data.charge + 2.5).toFixed(1);
-  return data.charge;
-}
+
 
 // ============================================================
 // HEADER
@@ -471,12 +466,12 @@ function createSeanceExoRow({ name, group, charge, series, reps, isTemplate }) {
   const div = document.createElement('div');
   div.className = 'seance-exo-row';
   const ressentiBtns = [1, 2, 3, 4, 5].map(v => `<button type="button" class="ressenti-btn ${v === 3 ? 'active' : ''}" data-value="${v}">${v}</button>`).join('');
-  const suggestion = getSuggestion(name);
-  const suggText = suggestion ? `Suggestion: ${suggestion}kg` : '';
+  const lp = getLastPerf(name);
+  const lpText = lp ? `${lp.series}\u00d7${lp.reps} \u00b7 ${lp.charge}kg \u00b7 R${lp.ressenti}` : '';
 
   if (isTemplate) {
     div.innerHTML = `<div class="seance-exo-line1"><span class="seance-exo-name">${name}</span><button type="button" class="seance-exo-info-btn" data-exo-name="${name}">i</button><button type="button" class="seance-exo-remove">\u2715</button></div>
-      <div class="seance-exo-line2"><span>${group}</span>${suggText ? `<span class="seance-exo-suggestion">${suggText}</span>` : ''}</div>
+      <div class="seance-exo-line2">${lpText ? `<span>Dernière: ${lpText}</span>` : `<span>${group}</span>`}</div>
       <div class="seance-exo-line3"><input type="number" class="seance-exo-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${charge}"><input type="number" class="seance-exo-field seance-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${series}"><input type="number" class="seance-exo-field seance-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${reps}"><div class="seance-exo-ressenti">${ressentiBtns}</div></div>
       <input type="hidden" class="seance-exo-name-val" value="${name}"><input type="hidden" class="seance-exo-group-val" value="${group}">`;
   } else {
@@ -554,20 +549,20 @@ function viewSession(id) {
     </div>
     <div class="panel-section"><h3>Exercices</h3>
       <div id="edit-exercises-list">
-      ${session.exercises.map((ex, i) => `<div class="seance-exo-row edit-exo-row" data-idx="${i}">
+      ${session.exercises.map((ex, i) => { const lp = getLastPerf(ex.name); const lpText = lp ? `${lp.series}\u00d7${lp.reps} \u00b7 ${lp.charge}kg \u00b7 R${lp.ressenti}` : '\u2014'; return `<div class="seance-exo-row edit-exo-row" data-idx="${i}">
         <div class="seance-exo-line1">
           <input type="text" class="seance-exo-name-input edit-ex-name" list="exercise-names" value="${ex.name}">
           <button type="button" class="seance-exo-remove edit-remove-ex">\u2715</button>
         </div>
         <input type="hidden" class="edit-ex-group" value="${ex.group}">
-        <div class="seance-exo-line2"><span class="edit-ex-group-label">${ex.group}</span></div>
+        <div class="seance-exo-line2"><span>Dernière: ${lpText}</span></div>
         <div class="seance-exo-line3">
           <input type="number" class="seance-exo-charge edit-ex-charge" inputmode="decimal" step="0.5" min="0" placeholder="kg" value="${ex.charge}">
           <input type="number" class="seance-exo-field edit-ex-series" inputmode="decimal" min="1" max="10" placeholder="S" value="${ex.series}">
           <input type="number" class="seance-exo-field edit-ex-reps" inputmode="decimal" min="1" max="50" placeholder="R" value="${ex.reps}">
           <div class="seance-exo-ressenti">${ressentiBtns(ex.ressenti)}</div>
         </div>
-      </div>`).join('')}
+      </div>`; }).join('')}
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
