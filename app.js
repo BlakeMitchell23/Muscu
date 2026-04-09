@@ -251,7 +251,7 @@ function renderAccueilTab() {
   renderHistoryInto('recent-history', 5);
   renderProgressTable();
 }
-function refreshAccueilCharts() { renderTrendChart(); }
+function refreshAccueilCharts() { renderAccueilTab(); }
 
 // Trend select (populated once, content updated on renderAll)
 function setupTrendSelect() {
