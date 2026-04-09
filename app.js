@@ -149,24 +149,23 @@ function getExercisesForMuscle(muscleId) {
   return out;
 }
 
-// ---- FORCE INDEX (with detail for tooltip) ----
+// ---- FORCE INDEX (vs meilleur précédent, with detail for tooltip) ----
 function computeForceIndex() {
-  const bases = {};
-  if (state.sessions.length > 0) {
-    state.sessions[0].exercises.forEach(ex => { if (!bases[ex.name]) bases[ex.name] = ex.charge * ex.series * ex.reps; });
-  }
+  const bestSoFar = {}; // exercice → meilleur volume load AVANT cette séance
   return state.sessions.map(s => {
     let total = 0, count = 0;
     const details = [];
     s.exercises.forEach(ex => {
       const vol = ex.charge * ex.series * ex.reps;
-      const base = bases[ex.name] || vol;
-      if (!bases[ex.name]) bases[ex.name] = vol;
-      if (base > 0) {
-        const pct = Math.round((vol / base) * 100);
+      const best = bestSoFar[ex.name];
+      if (best && best > 0) {
+        // On a un historique → comparer au meilleur précédent
+        const pct = Math.round((vol / best) * 100);
         total += pct; count++;
-        details.push({ name: ex.name, vol, base, pct });
+        details.push({ name: ex.name, vol, best, pct });
       }
+      // Mettre à jour le meilleur connu (pour les séances suivantes)
+      if (!bestSoFar[ex.name] || vol > bestSoFar[ex.name]) bestSoFar[ex.name] = vol;
     });
     return { date: s.date, id: s.id, index: count > 0 ? Math.round(total / count) : 100, details };
   });
@@ -319,7 +318,7 @@ function renderTrendChart() {
               if (m.type === 'global') {
                 lines.push(`${m.id} — Indice brut: ${m.raw}`);
                 lines.push('---');
-                m.details.slice(0, 5).forEach(d => { lines.push(`${d.name.length > 20 ? d.name.substring(0,18) + '..' : d.name}: ${d.pct}%`); });
+                m.details.slice(0, 5).forEach(d => { lines.push(`${d.name.length > 20 ? d.name.substring(0,18) + '..' : d.name}: ${d.pct}% vs PR`); });
                 if (m.details.length > 5) lines.push(`+ ${m.details.length - 5} autres`);
               } else {
                 lines.push(`${m.charge}kg × ${m.series}×${m.reps} = ${m.vol}`);
