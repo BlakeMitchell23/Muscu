@@ -152,7 +152,7 @@ const INITIAL_SESSIONS = [
     {"name":"Vertical Traction","group":"Dos_largeur","charge":50,"series":3,"reps":10,"ressenti":3},
     {"name":"Rowing assis","group":"Dos_épaisseur","charge":30,"series":3,"reps":12,"ressenti":3},
     {"name":"Élévations latérales câble","group":"Delt_latéral","charge":5,"series":3,"reps":12,"ressenti":4},
-    {"name":"Reverse Flyes","group":"Delt_postérieur","charge":10,"series":3,"reps":15,"ressenti":4}
+    {"name":"Face Pull câble","group":"Delt_postérieur","charge":10,"series":3,"reps":15,"ressenti":4}
   ]}
 ];
 
@@ -585,7 +585,7 @@ const PLANNING = (() => {
       { name: 'Vertical Traction', group: 'Dos_largeur', sets: '3×10-12', focus: '3e stimulus grand dorsal — volume additionnel' },
       { name: 'Rowing assis', group: 'Dos_épaisseur', sets: '3×10-12', focus: '3e stimulus dos épaisseur — squeeze scapulaire 1s' },
       { name: 'Élévations latérales câble', group: 'Delt_latéral', sets: '3×12-15', focus: '⚡ 3e stimulus delt latéral — ce muscle récupère vite, fréquence élevée possible' },
-      { name: 'Reverse Flyes', group: 'Delt_postérieur', sets: '3×15-20', focus: '3e stimulus delt postérieur — isolation pure, 82% MVC (ACE study)' }
+      { name: 'Face Pull câble', group: 'Delt_postérieur', sets: '3×15-20', focus: '3e stimulus delt postérieur — rotation externe + santé épaule, fréquence 3x/sem OK' }
     ]
   };
 
