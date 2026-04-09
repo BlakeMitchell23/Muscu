@@ -451,11 +451,15 @@ function openSeanceScreen2(tmpl, templateExercises) {
 }
 
 function renderSeanceExercises(templateExercises) {
-  const list = document.getElementById('seance-exercises-list'), mc = getMaxCharges();
+  const list = document.getElementById('seance-exercises-list');
   list.innerHTML = '';
   templateExercises.forEach(ex => {
     const m = ex.sets.match(/^(\d+)[\u00d7x](\d+)/);
-    list.appendChild(createSeanceExoRow({ name: ex.name, group: ex.group || EXERCISE_TO_GROUP[ex.name] || '', charge: mc[ex.name] || '', series: m ? parseInt(m[1]) : 3, reps: m ? parseInt(m[2]) : 10, isTemplate: true }));
+    const lp = getLastPerf(ex.name);
+    const charge = lp ? lp.charge : '';
+    const series = lp ? lp.series : (m ? parseInt(m[1]) : 3);
+    const reps = lp ? lp.reps : (m ? parseInt(m[2]) : 10);
+    list.appendChild(createSeanceExoRow({ name: ex.name, group: ex.group || EXERCISE_TO_GROUP[ex.name] || '', charge, series, reps, isTemplate: true }));
   });
 }
 
