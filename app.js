@@ -199,17 +199,6 @@ function getNextSessionKey() {
 function getTemplateExerciseNames(typeKey) { const s = PLANNING[0].sessions.find(s => s.type === typeKey); return s ? s.exercises.map(e => e.name) : []; }
 
 // ---- RECENT PRs ----
-function getRecentPRs() {
-  const prs = [], byExo = {};
-  state.sessions.forEach(s => { s.exercises.forEach(ex => { if (!byExo[ex.name]) byExo[ex.name] = []; byExo[ex.name].push({ vol: ex.charge * ex.series * ex.reps, charge: ex.charge, date: s.date }); }); });
-  Object.entries(byExo).forEach(([name, entries]) => {
-    if (entries.length < 2) return;
-    const last = entries[entries.length - 1];
-    const prevMax = Math.max(...entries.slice(0, -1).map(e => e.vol));
-    if (last.vol > prevMax && last.vol > 0) prs.push({ name, charge: last.charge, date: last.date });
-  });
-  return prs.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
-}
 
 // ---- CHARGE SUGGESTION ----
 function getSuggestion(name) {
@@ -247,7 +236,6 @@ function renderAccueilTab() {
   renderTrendSelect();
   renderTrendChart();
   renderNextSessionCard();
-  renderPRSection();
   renderHistoryInto('recent-history', 5);
   renderProgressTable();
 }
@@ -366,13 +354,7 @@ function renderNextSessionCard() {
 }
 
 // PR section
-function renderPRSection() {
-  const container = document.getElementById('pr-section');
-  const prs = getRecentPRs();
-  if (!prs.length) { container.innerHTML = ''; return; }
-  container.innerHTML = `<div class="pr-section"><span class="card-title">Records récents</span>
-    <div class="pr-scroll">${prs.map(pr => `<div class="pr-card"><div class="pr-card-name">${pr.name}</div><div class="pr-card-charge">${pr.charge}kg <span class="pr-badge">PR</span></div></div>`).join('')}</div></div>`;
-}
+
 
 // Voir tout button (attached once in init)
 function setupVoirTout() {
